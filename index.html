@@ -19,14 +19,25 @@ canvas,video{width:100%;max-width:360px;display:block;margin:10px auto;border:1p
 <input id="key" type="password" dir="ltr" autocomplete="off" placeholder="الصقه هنا">
 <p class="n">المفتاح بيفضل في الصفحة دي بس. مش بيتبعت لحد غير جوجل.</p>
 <label>الفكرة</label><textarea id="idea" rows="2" placeholder="مثال: ليه السما زرقا"></textarea>
-<label>الصوت</label><select id="voice"></select>
+<label>الصوت (ثابت لكل الفيديوهات، اختار مرة واحدة والصفحة تفتكره)</label><select id="voice"></select>
 <button id="go">اكتب السكريبت</button>
 <div id="step2" hidden><h2>الخطوة 2: راجع السكريبت</h2><p class="n">الافتتاحية والختام ثابتين. راجع كل معلومة من مصدرين قبل النشر.</p><div id="scenes"></div><button id="allv">اعمل الصوت لكل المشاهد</button></div>
 <h2>المعاينة</h2>
 <canvas id="cv" width="720" height="1280"></canvas><div id="bar" hidden><i></i></div>
 <button id="mk" hidden>صوّر الفيديو</button>
 <p class="n" id="msg" role="status" dir="auto"></p><p class="e" id="err" role="alert" dir="auto"></p>
-<div id="res" hidden><video id="vid" controls playsinline></video><button id="save">حفظ / مشاركة الفيديو</button></div>
+<div id="res" hidden><video id="vid" controls playsinline></video><p class="n" id="fmt" dir="auto"></p>
+<button id="conv" hidden>حوّل لـ MP4 متوافق مع واتساب</button>
+<button id="share" hidden>مشاركة (واتساب وغيره)</button>
+<button id="save">تحميل الفيديو</button>
+<a id="dl" href="#" style="display:block;text-align:center;padding:12px;margin-top:10px;border:1px solid #2f7f86;border-radius:10px;color:#2f7f86;text-decoration:none">رابط التحميل (اضغط مطولا واختار تنزيل)</a>
+<p class="n" dir="auto">لو واحدة منهم ماشتغلتش: اضغط على النقط التلاتة (⋮) في مشغل الفيديو فوق واختار تنزيل، أو اضغط مطولا على الفيديو. بعدها هتلاقيه في التنزيلات (Downloads) أو المعرض. الشاشة لازم تفضل شغالة وقت التصوير.</p></div>
+<details id="ytbox"><summary>رفع على يوتيوب (اختياري، مجاني، محتاج إعداد مرة واحدة)</summary>
+<p class="n" dir="auto">1) افتح console.cloud.google.com وسوّي مشروع جديد. 2) APIs &amp; Services &gt; Library &gt; فعّل YouTube Data API v3. 3) OAuth consent screen: External، وضيف إيميلك في Test users. 4) Credentials &gt; Create credentials &gt; OAuth client ID &gt; Web application، وفي Authorized JavaScript origins حط https://anasmahmoudabdulrahman-ui.github.io وبعدين انسخ الـ Client ID والصقه هنا. ده مش سر، بس مش بيتبعت لحد غير جوجل.</p>
+<label>Client ID</label><input id="ytid" dir="ltr" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com">
+<label>عنوان الفيديو</label><input id="yttitle" dir="auto" placeholder="سر في دقيقة: ..."><label>الخصوصية</label>
+<select id="ytpriv"><option value="private">خاص (private)</option><option value="unlisted">غير مدرج (unlisted)</option><option value="public">عام (public)</option></select>
+<button id="yt">ارفع على يوتيوب</button><p class="n" id="ytmsg" dir="auto"></p></details>
 <p class="n">الحد المجاني بيظهر في AI Studio. على الطبقة المجانية جوجل بتستخدم المحتوى لتحسين منتجاتها، وكل صوت عليه علامة SynthID.</p>
 </main><script>
 const OPENER = 'دقيقة واحدة وهتعرف سر جديد';
@@ -270,6 +281,35 @@ function wrap(ctx, words, maxW) {
     return lines;
 }
 const W = 720, H = 1280;
+const _wt = new WeakMap();
+// Word timings with no paid service: find where speech starts and ends in the TTS audio,
+// then split that span across the words by length (plus a pause after punctuation).
+function wordTimes(scene) {
+    const key = scene.pcm || scene;
+    const sig = (scene.voice || '') + '|' + (scene.pcm ? scene.pcm.length : 0);
+    const hit = _wt.get(key);
+    if (hit && hit.sig === sig) return hit;
+    const words = String(scene.voice || '').split(/\s+/).filter(Boolean);
+    let s0 = 0, e1 = scene.pcm ? scene.pcm.length / SR : Math.max(2, Math.min(9, (scene.voice || '').length / 13));
+    const p = scene.pcm;
+    if (p && p.length > SR / 10) {
+        const win = Math.round(SR * 0.01); let a = -1, b = -1;
+        for (let i = 0; i + win <= p.length; i += win) { let m = 0; for (let k = i; k < i + win; k += 4) m = Math.max(m, Math.abs(p[k])); if (m > 0.02) { if (a < 0) a = i; b = i + win; } }
+        if (a >= 0) { s0 = Math.max(0, a / SR - 0.03); e1 = Math.min(p.length / SR, b / SR + 0.05); }
+    }
+    const wt = words.map((w) => w.length + (/[،,.؟?!:؛]$/.test(w) ? 3 : 0) + 1);
+    const sum = wt.reduce((a, b) => a + b, 0) || 1;
+    let cur = s0, g = 0, inG = 0;
+    const out = words.map((w, i) => {
+        const d = (e1 - s0) * wt[i] / sum, o = { t: w.replace(/[،,.؟?!:؛]+$/, ''), s: cur, e: cur + d, g };
+        cur += d; inG++;
+        if (inG >= 3 || /[،,.؟?!:؛]$/.test(w)) { g++; inG = 0; }
+        return o;
+    });
+    const r = { sig, words: out };
+    _wt.set(key, r);
+    return r;
+}
 function drawFrame(ctx, scene, img, idx, total, t) {
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, W, H);
@@ -287,37 +327,63 @@ function drawFrame(ctx, scene, img, idx, total, t) {
         ctx.lineTo(W, y);
         ctx.stroke();
     }
-    const k = Math.min(1, t / 0.5);
+    // floating background dots (slow parallax)
+    for (let n = 0; n < 7; n++) {
+        const px = (n * 173 + 60 + Math.sin(t * 0.6 + n) * 24) % W, py = (n * 211 + 90 + t * (10 + n * 3) * (n % 2 ? 1 : -1) + 4000) % 1100;
+        ctx.globalAlpha = 0.16; ctx.fillStyle = n % 3 === 0 ? C.b : n % 3 === 1 ? C.a : C.c;
+        ctx.beginPath(); ctx.arc(px, py + 60, 10 + (n % 3) * 7, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // scene title (small) when it differs from the spoken line
+    const hasTitle = scene.caption && scene.caption !== scene.voice;
+    if (hasTitle) {
+        ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = 'bold 42px "Noto Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif';
+        ctx.globalAlpha = Math.min(1, t / 0.3); ctx.fillStyle = C.ink;
+        ctx.fillText(scene.caption, W / 2, 90);
+        ctx.globalAlpha = 1;
+    }
+    // drawing: pop-in from a different side per scene, then gentle float and slow zoom
+    const k = Math.min(1, t / 0.55);
+    const c1 = 1.70158, c3 = c1 + 1;
+    const eb = 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2);
     const e = 1 - Math.pow(1 - k, 3);
     if (img) {
-        const size = 600 * (0.92 + 0.08 * e);
+        const dir = idx % 4;
+        const dx = (dir === 0 ? -1 : dir === 1 ? 1 : 0) * 220 * (1 - e), dy = (dir === 2 ? 1 : dir === 3 ? -1 : 0) * 220 * (1 - e);
+        const zoom = (0.62 + 0.38 * eb) * (1 + 0.05 * Math.min(1, t / (scene.dur ?? 3)));
+        const size = 600 * zoom;
         ctx.save();
-        ctx.globalAlpha = e;
-        ctx.drawImage(img, (W - size) / 2, 150 + (600 - size) / 2, size, size);
+        ctx.globalAlpha = Math.min(1, k * 1.6);
+        ctx.translate(W / 2 + dx, 450 + dy + Math.sin(t * 2.1) * 9);
+        ctx.rotate(Math.sin(t * 1.4 + idx) * 0.018 + (1 - e) * (dir % 2 ? 0.12 : -0.12));
+        ctx.drawImage(img, -size / 2, -size / 2, size, size);
         ctx.restore();
     }
-    ctx.direction = 'rtl';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    ctx.font = 'bold 54px "Noto Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif';
-    const words = scene.caption.split(/\s+/).filter(Boolean);
-    const lines = wrap(ctx, words, W - 120);
-    const lh = 78;
-    let y = 880 - ((lines.length - 1) * lh) / 2;
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, t / 0.35);
-    for (const ln of lines) {
-        const space = ctx.measureText(' ').width;
-        const total = ln.reduce((a, w) => a + ctx.measureText(w).width, 0) + space * (ln.length - 1);
-        let x = W / 2 + total / 2;
-        for (const w of ln) {
-            ctx.fillStyle = scene.red && w.includes(scene.red) ? C.c : C.ink;
-            ctx.fillText(w, x, y);
-            x -= ctx.measureText(w).width + space;
-        }
-        y += lh;
+    // word-synced karaoke captions
+    const tm = wordTimes(scene);
+    ctx.direction = 'rtl'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold 60px "Noto Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif';
+    if (tm.words.length) {
+        let cur = tm.words.findIndex((w) => t >= w.s && t < w.e);
+        if (cur < 0) cur = t < tm.words[0].s ? 0 : tm.words.length - 1;
+        const g = tm.words[cur].g, grp = tm.words.filter((w) => w.g === g);
+        const space = ctx.measureText(' ').width + 14, pad = 16;
+        const wid = grp.map((w) => ctx.measureText(w.t).width);
+        const totalW = wid.reduce((a, b) => a + b, 0) + space * (grp.length - 1);
+        let x = W / 2 + totalW / 2;
+        grp.forEach((w, n) => {
+            const active = w === tm.words[cur];
+            const pop = active ? 1 + 0.1 * Math.max(0, 1 - (t - w.s) / 0.15) : 1;
+            ctx.save();
+            ctx.translate(x - wid[n] / 2, 900); ctx.scale(pop, pop);
+            if (active) { ctx.fillStyle = C.c; const bw = wid[n] + pad * 2, bh = 88; ctx.beginPath(); ctx.roundRect(-bw / 2, -bh / 2, bw, bh, 20); ctx.fill(); }
+            ctx.fillStyle = active ? '#fff' : C.ink; ctx.textAlign = 'center';
+            ctx.fillText(w.t, 0, 0);
+            ctx.restore();
+            x -= wid[n] + space;
+        });
     }
-    ctx.restore();
     ctx.textAlign = 'center';
     ctx.font = 'bold 34px "Noto Sans Arabic",Tahoma,Arial,sans-serif';
     ctx.fillStyle = C.a;
@@ -328,7 +394,7 @@ function drawFrame(ctx, scene, img, idx, total, t) {
     ctx.fillStyle = C.c;
     ctx.fillRect(80, 1220, bw, 6);
 }
-async function renderVideo(canvas, scenes, onProgress) {
+async function renderRecorder(canvas, scenes, onProgress) {
     const ctx = canvas.getContext('2d');
     const imgs = await Promise.all(scenes.map((s) => loadSvg(s.draw)));
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -356,7 +422,7 @@ async function renderVideo(canvas, scenes, onProgress) {
         src.connect(dest);
         src.start(t0 + starts[i]);
     });
-    const cands = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const cands = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
     const mime = cands.find((m) => window.MediaRecorder?.isTypeSupported?.(m)) ?? '';
     const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
     const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 3500000 } : undefined);
@@ -384,14 +450,83 @@ async function renderVideo(canvas, scenes, onProgress) {
     rec.stop();
     await done;
     await ac.close();
-    const type = (rec.mimeType || mime || 'video/webm').split(';')[0];
-    return { blob: new Blob(chunks, { type }), mime: type };
+    const full = rec.mimeType || mime || 'video/webm';
+    const type = full.split(';')[0];
+    return { blob: new Blob(chunks, { type }), mime: type, safe: /avc1/i.test(full) && /mp4a/i.test(full) && type === 'video/mp4' };
+}
+function loadScript(src) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('load ' + src)); document.head.appendChild(el); }); }
+async function loadMuxer() {
+    if (window.Mp4Muxer) return;
+    const urls = ['https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js', 'https://unpkg.com/mp4-muxer@5.1.3/build/mp4-muxer.js'];
+    for (const u of urls) { try { await loadScript(u); if (window.Mp4Muxer) return; } catch (e) {} }
+    throw new Error('ماقدرتش أحمل مكتبة MP4');
+}
+// Real H.264 + AAC MP4 through WebCodecs. Faster than real time, screen can sleep.
+async function renderMp4(canvas, scenes, onProgress) {
+    if (!window.VideoEncoder || !window.AudioEncoder || !window.VideoFrame || !window.AudioData) throw new Error('WebCodecs مش متاح');
+    await loadMuxer();
+    const ctx = canvas.getContext('2d'), FPS = 30, W0 = canvas.width, H0 = canvas.height;
+    const imgs = await Promise.all(scenes.map((s) => loadSvg(s.draw)));
+    const durs = scenes.map((s) => (s.pcm ? s.pcm.length / SR : 3) + 0.45);
+    const starts = []; let acc = 0.3;
+    for (const d of durs) { starts.push(acc); acc += d; }
+    const total = acc + 0.3;
+    let vcfg = null;
+    for (const codec of ['avc1.640028', 'avc1.4d0028', 'avc1.42002a', 'avc1.42001f']) {
+        const c = { codec, width: W0, height: H0, bitrate: 3500000, framerate: FPS };
+        try { const r = await VideoEncoder.isConfigSupported(c); if (r.supported) { vcfg = r.config || c; vcfg.codec = codec; break; } } catch (e) {}
+    }
+    if (!vcfg) throw new Error('H.264 مش متاح');
+    const acfg = { codec: 'mp4a.40.2', sampleRate: SR, numberOfChannels: 1, bitrate: 96000 };
+    const ar = await AudioEncoder.isConfigSupported(acfg);
+    if (!ar.supported) throw new Error('AAC مش متاح');
+    const muxer = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: 'avc', width: W0, height: H0 }, audio: { codec: 'aac', numberOfChannels: 1, sampleRate: SR }, fastStart: 'in-memory' });
+    let fail = null;
+    const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: (e) => { fail = e; } });
+    venc.configure(vcfg);
+    const aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: (e) => { fail = e; } });
+    aenc.configure(acfg);
+    // audio
+    const n = Math.ceil(total * SR), pcm = new Float32Array(n);
+    scenes.forEach((s, i) => { if (s.pcm) pcm.set(s.pcm.subarray(0, Math.max(0, Math.min(s.pcm.length, n - Math.round(starts[i] * SR)))), Math.round(starts[i] * SR)); });
+    const CH = 4800;
+    for (let off = 0; off < n; off += CH) {
+        const len = Math.min(CH, n - off);
+        const ad = new AudioData({ format: 'f32', sampleRate: SR, numberOfFrames: len, numberOfChannels: 1, timestamp: Math.round(off * 1e6 / SR), data: pcm.subarray(off, off + len) });
+        aenc.encode(ad); ad.close();
+        if (aenc.encodeQueueSize > 20) await sleep(0);
+        if (fail) throw fail;
+    }
+    // video
+    const frames = Math.ceil(total * FPS);
+    for (let f = 0; f < frames; f++) {
+        const el = f / FPS;
+        let i = starts.findIndex((st, k) => el >= st && (k === starts.length - 1 || el < starts[k + 1]));
+        if (i < 0) i = el < starts[0] ? 0 : scenes.length - 1;
+        drawFrame(ctx, { ...scenes[i], dur: durs[i] }, imgs[i], i, scenes.length, Math.max(0, el - starts[i]));
+        const vf = new VideoFrame(canvas, { timestamp: Math.round(f * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+        venc.encode(vf, { keyFrame: f % 60 === 0 }); vf.close();
+        while (venc.encodeQueueSize > 8) { await sleep(5); if (fail) break; }
+        if (fail) throw fail;
+        if (f % 10 === 0) { onProgress(f / frames); await sleep(0); }
+    }
+    await venc.flush(); await aenc.flush();
+    if (fail) throw fail;
+    muxer.finalize();
+    return { blob: new Blob([muxer.target.buffer], { type: 'video/mp4' }), mime: 'video/mp4', safe: true };
+}
+async function renderVideo(canvas, scenes, onProgress) {
+    try { return await renderMp4(canvas, scenes, onProgress); }
+    catch (e) { console.warn('mp4 path failed', e); onStatus('تصوير MP4 المباشر مش متاح (' + (e.message || e) + ')، بجرب الطريقة التانية…'); window.__mp4fail = String(e && e.message || e); }
+    return renderRecorder(canvas, scenes, onProgress);
 }
 const $ = (id) => document.getElementById(id);
 setStatusHook(t => { $('msg').textContent = t; });
 let scenes = [], busy = false, video = null;
 const VOICES = ['Kore','Puck','Charon','Fenrir','Aoede','Zephyr'];
 $('voice').innerHTML = VOICES.map(v => `<option>${v}</option>`).join('');
+try { const sv = localStorage.getItem('voice'); if (sv && VOICES.includes(sv)) $('voice').value = sv; } catch (e) {}
+$('voice').onchange = () => { try { localStorage.setItem('voice', $('voice').value); } catch (e) {} };
 const msg = (t) => $('msg').textContent = t || '';
 const err = (e) => { $('err').textContent = e ? (e.message || String(e)) : ''; if (e) $('msg').textContent = 'حصلت مشكلة:'; busy = false; };
 window.addEventListener('error', (ev) => err('خطأ في الصفحة: ' + (ev.message || 'غير معروف')));
@@ -422,12 +557,89 @@ $('mk').onclick = async () => {
   err(''); if (scenes.some(s => !s.pcm)) return err('فيه مشاهد من غير صوت. اعمل الصوت الأول.');
   try { $('cv').scrollIntoView({block: 'center'}); msg('بصور الفيديو. سيب الشاشة شغالة.'); $('bar').hidden = false;
     const r = await renderVideo($('cv'), scenes, p => $('bar').firstElementChild.style.width = Math.round(p * 100) + '%');
-    video = r; $('bar').hidden = true; const v = $('vid'); v.src = URL.createObjectURL(r.blob); $('res').hidden = false; msg('الفيديو جاهز. اضغط حفظ.');
+    video = r; $('bar').hidden = true; const v = $('vid'); const url = URL.createObjectURL(r.blob); v.src = url; $('res').hidden = false; if (!$('yttitle').value) $('yttitle').value = scenes?.[1]?.caption || '';
+    const ext = r.mime.includes('mp4') ? 'mp4' : 'webm'; $('dl').href = url; $('dl').download = `sir-fi-daqiqa.${ext}`;
+    const f0 = new File([r.blob], `sir-fi-daqiqa.${ext}`, {type: r.mime}); $('share').hidden = !(navigator.canShare && navigator.canShare({files: [f0]}));
+    $('conv').hidden = !!r.safe;
+    $('fmt').textContent = r.safe ? `الصيغة: MP4 (H.264 + AAC) تشتغل في المعرض وواتساب ويوتيوب. الحجم ${(r.blob.size/1048576).toFixed(1)} ميجا.` : `الفيديو اتسجل بصيغة (${ext}) ممكن واتساب مايقبلهاش. اضغط "حوّل لـ MP4 متوافق" تحت (محتاج نت وبياخد كام دقيقة).`;
+    msg('الفيديو جاهز. شغله من فوق، وبعدين اشترك أو حمّل من الزراير تحت.'); $('res').scrollIntoView({behavior:'smooth'});
   } catch (e) { $('bar').hidden = true; err(e); }
 };
-$('save').onclick = async () => {
-  if (!video) return; const ext = video.mime.includes('mp4') ? 'mp4' : 'webm'; const f = new File([video.blob], `sir-fi-daqiqa.${ext}`, {type: video.mime});
-  try { if (navigator.canShare && navigator.canShare({files: [f]})) { await navigator.share({files: [f]}); return; } } catch (e) {}
-  const a = document.createElement('a'); a.href = URL.createObjectURL(video.blob); a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); msg('اتحمل الملف. لو مش ظاهر، شوف التنزيلات.');
+$('conv').onclick = async () => {
+  if (!video || $('conv').disabled) return; $('conv').disabled = true; err('');
+  try {
+    msg('بحمل أداة التحويل (حوالي 30 ميجا، مرة واحدة)…');
+    const B = 'https://cdn.jsdelivr.net/npm/';
+    await loadScript(B + '@ffmpeg/util@0.12.1/dist/umd/index.js'); await loadScript(B + '@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js');
+    const { toBlobURL } = FFmpegUtil; const ff = new FFmpegWASM.FFmpeg();
+    ff.on('progress', ({ progress }) => { msg('بحوّل لـ MP4… ' + Math.max(0, Math.min(99, Math.round(progress * 100))) + '%'); });
+    await ff.load({ classWorkerURL: await toBlobURL(B + '@ffmpeg/ffmpeg@0.12.10/dist/umd/814.ffmpeg.js', 'text/javascript'), coreURL: await toBlobURL(B + '@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js', 'text/javascript'), wasmURL: await toBlobURL(B + '@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm', 'application/wasm') });
+    const inName = video.mime.includes('mp4') ? 'in.mp4' : 'in.webm';
+    await ff.writeFile(inName, new Uint8Array(await video.blob.arrayBuffer()));
+    msg('بحوّل لـ MP4…');
+    const code = await ff.exec(['-i', inName, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '27', '-vf', 'scale=out_range=tv,format=yuv420p', '-r', '30', '-c:a', 'aac', '-b:a', '96k', '-ar', '44100', '-movflags', '+faststart', 'out.mp4']);
+    if (code !== 0) throw new Error('التحويل فشل (' + code + ')');
+    const data = await ff.readFile('out.mp4');
+    const blob = new Blob([data.buffer], { type: 'video/mp4' });
+    video = { blob, mime: 'video/mp4', safe: true };
+    const url = URL.createObjectURL(blob); $('vid').src = url; $('dl').href = url; $('dl').download = 'sir-fi-daqiqa.mp4';
+    $('conv').hidden = true; $('fmt').textContent = `اتحول لـ MP4 (H.264 + AAC). الحجم ${(blob.size/1048576).toFixed(1)} ميجا.`;
+    const f0 = new File([blob], 'sir-fi-daqiqa.mp4', { type: 'video/mp4' }); $('share').hidden = !(navigator.canShare && navigator.canShare({ files: [f0] }));
+    msg('التحويل خلص. حمّل أو شارك.');
+  } catch (e) { err('التحويل مانفعش: ' + (e.message || e) + '. جرب تفتح الأداة من Chrome أحدث، أو حمّل الملف وحوّله بتطبيق تحويل.'); }
+  $('conv').disabled = false;
+};
+try { $('ytid').value = localStorage.getItem('ytid') || ''; } catch (e) {}
+let gisReady = false;
+$('ytbox').addEventListener('toggle', () => { if ($('ytbox').open && !window.google?.accounts?.oauth2) loadScript('https://accounts.google.com/gsi/client').then(() => { gisReady = true; }).catch(() => { $('ytmsg').textContent = 'ماقدرتش أحمل تسجيل دخول جوجل. اتأكد من النت.'; }); });
+const ytErr = async (res) => {
+  let m = ''; try { const j = await res.json(); m = j?.error?.errors?.[0]?.reason || j?.error?.message || ''; } catch (e) {}
+  if (/quotaExceeded|dailyLimit/i.test(m)) return 'خلصت حصة يوتيوب اليومية (حوالي 6 فيديوهات في اليوم). جرب بكرة.';
+  if (/accessNotConfigured|has not been used|disabled/i.test(m)) return 'YouTube Data API مش مفعّلة في مشروعك. فعّلها من Library.';
+  if (/uploadLimitExceeded/i.test(m)) return 'وصلت حد الرفع على قناتك. جرب بعدين.';
+  if (res.status === 401) return 'تسجيل الدخول انتهى. اضغط ارفع تاني.';
+  if (res.status === 403) return 'يوتيوب رفض الطلب (403). اتأكد إن إيميلك في Test users وإن القناة موجودة. ' + m;
+  return `يوتيوب رد بخطأ (${res.status}). ${m}`;
+};
+$('yt').onclick = async () => {
+  const out = (t, bad) => { $('ytmsg').textContent = t; if (bad) err(t); };
+  if (!video) return out('اعمل الفيديو الأول.', true);
+  const cid = $('ytid').value.trim(); if (!cid) return out('حط الـ Client ID الأول.', true);
+  if (!video.safe) return out('الفيديو مش MP4 متوافق. اضغط "حوّل لـ MP4" الأول.', true);
+  try { localStorage.setItem('ytid', cid); } catch (e) {}
+  if (!window.google?.accounts?.oauth2) return out('تسجيل الدخول لسه بيتحمل، اضغط ارفع تاني بعد ثانيتين.', true);
+  err(''); out('بفتح تسجيل الدخول لجوجل…');
+  try {
+    const token = await new Promise((res, rej) => {
+      const tc = google.accounts.oauth2.initTokenClient({ client_id: cid, scope: 'https://www.googleapis.com/auth/youtube.upload',
+        callback: (r) => r.access_token ? res(r.access_token) : rej(new Error(r.error_description || r.error || 'مفيش توكن')),
+        error_callback: (e) => rej(new Error('تسجيل الدخول اتلغى أو اتمنع (' + (e?.type || '?') + '). اتأكد إن الـ origin مضاف وإيميلك في Test users.')) });
+      tc.requestAccessToken();
+    });
+    out('بجهز الرفع…');
+    const title = ($('yttitle').value.trim() || scenes?.[1]?.caption || 'سر في دقيقة').slice(0, 95);
+    const meta = { snippet: { title: title + ' #Shorts', description: 'سر في دقيقة\n#Shorts', categoryId: '27' }, status: { privacyStatus: $('ytpriv').value, selfDeclaredMadeForKids: false } };
+    const init = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Length': String(video.blob.size), 'X-Upload-Content-Type': 'video/mp4' }, body: JSON.stringify(meta) });
+    if (!init.ok) throw new Error(await ytErr(init));
+    const loc = init.headers.get('Location'); if (!loc) throw new Error('يوتيوب ماداناش رابط الرفع.');
+    const resp = await new Promise((res, rej) => {
+      const x = new XMLHttpRequest(); x.open('PUT', loc); x.setRequestHeader('Content-Type', 'video/mp4');
+      x.upload.onprogress = (ev) => { if (ev.lengthComputable) out('برفع… ' + Math.round(ev.loaded / ev.total * 100) + '%'); };
+      x.onload = () => (x.status >= 200 && x.status < 300) ? res(JSON.parse(x.responseText)) : rej(new Error('الرفع فشل (' + x.status + ')'));
+      x.onerror = () => rej(new Error('النت قطع وقت الرفع. جرب تاني.')); x.send(video.blob);
+    });
+    out('اترفع ✅ https://youtu.be/' + resp.id + ' (' + $('ytpriv').value + '). غيّر الخصوصية من YouTube Studio لو عايز.');
+  } catch (e) { out(e.message || String(e), true); }
+};
+const vfile = () => { const ext = video.mime.includes('mp4') ? 'mp4' : 'webm'; return new File([video.blob], `sir-fi-daqiqa.${ext}`, {type: video.mime}); };
+$('share').onclick = async () => {
+  if (!video) return;
+  try { await navigator.share({ files: [vfile()], title: 'سر في دقيقة' }); msg('اتبعت.'); }
+  catch (e) { if (e && e.name === 'AbortError') return; err('المشاركة ماشتغلتش (' + (e && e.name || '?') + '). استخدم زرار التحميل أو النقط التلاتة في مشغل الفيديو.'); }
+};
+$('save').onclick = () => {
+  if (!video) return;
+  try { const f = vfile(); const a = document.createElement('a'); a.href = URL.createObjectURL(video.blob); a.download = f.name; a.style.display = 'none'; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000); msg('بدأ التحميل. شوف التنزيلات (Downloads). لو مظهرش: النقط التلاتة في مشغل الفيديو > تنزيل.'); }
+  catch (e) { err('التحميل ماشتغلش. استخدم النقط التلاتة في مشغل الفيديو > تنزيل.'); }
 };
 </script></body></html>
