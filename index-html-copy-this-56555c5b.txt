@@ -1,0 +1,385 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>أداة سر في دقيقة</title>
+<style>
+body{margin:0;font:16px/1.6 "Noto Sans Arabic",Tahoma,Arial,sans-serif;background:#fdfbf7;color:#2b2b2b}
+main{max-width:560px;margin:0 auto;padding:20px}
+h1{font-size:26px;margin:8px 0}h2{font-size:18px;margin:26px 0 6px}
+input,textarea,select{width:100%;box-sizing:border-box;padding:12px;font:inherit;border:1px solid #ddd;border-radius:10px;background:#fff;margin:4px 0}
+button{font:inherit;padding:12px;border-radius:10px;border:1px solid #2f7f86;background:#2f7f86;color:#fff;width:100%;min-height:48px;margin-top:10px}
+.b2{background:#fff;color:#2f7f86;width:auto;min-height:40px;margin:0;padding:8px 12px}
+.sc{display:grid;gap:6px;padding:12px 0;border-top:1px solid #e5e0d4}.row{display:flex;gap:8px;flex-wrap:wrap}
+.n{color:#666;margin:6px 0}.e{color:#b3261e}
+canvas,video{width:100%;max-width:360px;display:block;margin:10px auto;border:1px solid #ddd;border-radius:10px;background:#f3ead7}
+#bar{height:8px;background:#e5e0d4;border-radius:4px;overflow:hidden}#bar i{display:block;height:100%;width:0;background:#2f7f86}
+[hidden]{display:none!important}
+</style></head><body><main>
+<h1>أداة سر في دقيقة</h1><p class="n">فكرة ← سكريبت ← صوت ← مشاهد ← فيديو. كل حاجة بتتعمل جوه المتصفح بتاعك.</p>
+<button id="demo" class="b2" style="width:100%">تجربة بدون مفتاح (صوت صامت)</button>
+<h2>الخطوة 1</h2>
+<label>مفتاح جوجل (Gemini API) من aistudio.google.com</label>
+<input id="key" type="password" dir="ltr" autocomplete="off" placeholder="الصقه هنا">
+<p class="n">المفتاح بيفضل في الصفحة دي بس. مش بيتبعت لحد غير جوجل.</p>
+<label>الفكرة</label><textarea id="idea" rows="2" placeholder="مثال: ليه السما زرقا"></textarea>
+<label>الصوت</label><select id="voice"></select>
+<button id="go">اكتب السكريبت</button>
+<div id="step2" hidden><h2>الخطوة 2: راجع السكريبت</h2><p class="n">الافتتاحية والختام ثابتين. راجع كل معلومة من مصدرين قبل النشر.</p><div id="scenes"></div><button id="allv">اعمل الصوت لكل المشاهد</button></div>
+<h2>المعاينة</h2>
+<canvas id="cv" width="720" height="1280"></canvas><div id="bar" hidden><i></i></div>
+<button id="mk" hidden>صوّر الفيديو</button>
+<p class="n" id="msg" role="status" dir="auto"></p><p class="e" id="err" role="alert" dir="auto"></p>
+<div id="res" hidden><video id="vid" controls playsinline></video><button id="save">حفظ / مشاركة الفيديو</button></div>
+<p class="n">الحد المجاني بيظهر في AI Studio. على الطبقة المجانية جوجل بتستخدم المحتوى لتحسين منتجاتها، وكل صوت عليه علامة SynthID.</p>
+</main><script>
+const OPENER = 'دقيقة واحدة وهتعرف سر جديد';
+const CLOSER = 'قولوا لنا عايزين تعرفوا سر إيه';
+const API = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const TEXT_MODEL = 'gemini-3.8-flash';
+const TTS_MODEL = 'gemini-3.8-flash-tts';
+const TEXT_MODELS = [TEXT_MODEL];
+const TTS_MODELS = [TTS_MODEL, 'gemini-3.8-flash-lite-tts'];
+const SR = 24000;
+const C = { bg: '#f3ead7', ink: '#2b2b2b', a: '#2f7f86', b: '#e0a84a', c: '#c8553d' };
+function svgFrame(inner) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="640" height="640">${inner}</svg>`;
+}
+function cleanSvg(raw) {
+    let s = raw.replace(/```(?:svg|xml)?/g, '').trim();
+    const i = s.indexOf('<svg');
+    const j = s.lastIndexOf('</svg>');
+    if (i < 0 || j < 0)
+        return '';
+    s = s.slice(i, j + 6);
+    s = s.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+="[^"]*"/gi, '').replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '');
+    if (!/xmlns=/.test(s))
+        s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    if (!/viewBox=/.test(s))
+        s = s.replace('<svg', '<svg viewBox="0 0 640 640"');
+    s = s.replace(/<svg([^>]*?)\swidth="[^"]*"/, '<svg$1').replace(/<svg([^>]*?)\sheight="[^"]*"/, '<svg$1 width="640" height="640"');
+    return s;
+}
+const SAMPLE = [
+    { voice: OPENER, caption: OPENER, red: 'سر', draw: svgFrame(`<circle cx="320" cy="320" r="170" fill="${C.b}"/><circle cx="320" cy="320" r="110" fill="#fff3c4"/><text x="320" y="360" font-size="120" text-anchor="middle" fill="${C.c}">?</text>`) },
+    { voice: 'ليه السما زرقا؟ طب إزاي ضوء الشمس الأبيض بيبقى أزرق؟', caption: 'ليه السما زرقا؟', red: 'زرقا', draw: svgFrame(`<circle cx="130" cy="130" r="70" fill="${C.b}"/><path d="M200 150 L520 300" stroke="${C.b}" stroke-width="14"/><rect x="60" y="440" width="520" height="90" rx="20" fill="${C.a}" opacity=".5"/>`) },
+    { voice: 'ضوء الشمس فيه كل الألوان، والهوا بيفرق الأزرق أكتر من غيره.', caption: 'الهوا بيفرق الأزرق', red: 'الأزرق', draw: svgFrame(`<path d="M80 320 H560" stroke="${C.ink}" stroke-width="10"/><circle cx="300" cy="320" r="26" fill="${C.a}"/><circle cx="380" cy="250" r="18" fill="${C.a}"/><circle cx="420" cy="390" r="18" fill="${C.a}"/><path d="M300 320 L380 250 M300 320 L420 390" stroke="${C.a}" stroke-width="6" stroke-dasharray="14 10"/>`) },
+    { voice: CLOSER, caption: CLOSER, red: 'سر', draw: svgFrame(`<rect x="170" y="190" width="300" height="220" rx="40" fill="${C.a}"/><path d="M250 410 L230 480 L320 410Z" fill="${C.a}"/><text x="320" y="340" font-size="120" text-anchor="middle" fill="#fff">؟</text>`) },
+];
+function silentPcm(text) {
+    const secs = Math.max(2, Math.min(9, text.length / 13));
+    return new Float32Array(Math.round(secs * SR));
+}
+function b64ToF32(b64) {
+    const bin = atob(b64);
+    const n = Math.floor(bin.length / 2);
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        let v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+        if (v >= 0x8000)
+            v -= 0x10000;
+        out[i] = v / 32768;
+    }
+    return out;
+}
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+let onStatus = () => { };
+function setStatusHook(f) { onStatus = f; }
+function niceError(status, txt) {
+    let m = txt;
+    try {
+        m = JSON.parse(txt)?.error?.message ?? txt;
+    }
+    catch { /* keep raw */ }
+    if (status === 400 && /API key|API_KEY/i.test(m))
+        return 'المفتاح غلط أو مش شغال. اتأكد إنك نسخته كامل.';
+    if (status === 403)
+        return 'المفتاح مش مسموح له يستخدم الموديل ده (403). جرب مفتاح تاني من AI Studio.';
+    if (status === 429)
+        return 'وصلت للحد المجاني دلوقتي. استنى دقيقة وجرب تاني، ولو اتكرر يبقى الحد اليومي خلص (بيتجدد بكرة).';
+    if (status === 503 || status === 500)
+        return 'جوجل مشغولة دلوقتي (الضغط عليها عالي). جربت أكتر من مرة وموديل بديل. جرب تاني بعد دقيقتين.';
+    if (status === 404)
+        return 'الموديل مش متاح على مفتاحك. (404)';
+    return `خطأ من جوجل (${status}). جرب تاني.`;
+}
+async function callOnce(model, key, body) {
+    let res;
+    try {
+        res = await fetch(`${API}${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body) });
+    }
+    catch {
+        return { ok: false, status: 0, text: 'network' };
+    }
+    if (res.ok)
+        return { ok: true, status: 200, data: await res.json() };
+    return { ok: false, status: res.status, text: await res.text() };
+}
+let discovered = null;
+const preferred = {};
+async function discover(key, kind) {
+    try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200`, { headers: { 'x-goog-api-key': key } });
+        if (!res.ok)
+            return [];
+        const j = await res.json();
+        const names = (j.models ?? []).filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent')).map((m) => String(m.name).replace(/^models\//, ''));
+        if (kind === 'tts')
+            return names.filter((n) => /tts/i.test(n));
+        return names.filter((n) => /flash/i.test(n) && !/tts|image|live|audio|embed|robotics|computer|native/i.test(n));
+    }
+    catch {
+        return [];
+    }
+}
+// Retries each model with backoff, then tries the fallback models.
+async function post(models, key, body, kind) {
+    let lastStatus = 0, lastText = '';
+    let list = preferred[kind] ? [preferred[kind], ...models.filter((m) => m !== preferred[kind])] : [...models];
+    let extended = false;
+    for (let mi = 0; mi < list.length; mi++) {
+        const model = list[mi];
+        const waits = [0, 4000, 9000];
+        for (let t = 0; t < waits.length; t++) {
+            if (waits[t]) {
+                onStatus(`جوجل مشغولة، بحاول تاني (${t + 1} من ${waits.length}) بموديل ${model}…`);
+                await sleep(waits[t]);
+            }
+            const r = await callOnce(model, key, body);
+            if (r.ok) {
+                preferred[kind] = model;
+                return r.data;
+            }
+            lastStatus = r.status;
+            lastText = r.text ?? '';
+            const retry = r.status === 0 || r.status === 429 || r.status === 500 || r.status === 503 || r.status === 504;
+            if (!retry)
+                break;
+        }
+        if (lastStatus === 400 || lastStatus === 401 || lastStatus === 403)
+            throw new Error(niceError(lastStatus, lastText));
+        if (mi === list.length - 1 && !extended) {
+            extended = true;
+            discovered = discovered ?? discover(key, kind);
+            const more = (await discovered).filter((n) => !list.includes(n)).slice(0, 3);
+            list = [...list, ...more];
+        }
+        if (mi < list.length - 1)
+            onStatus('بجرب موديل بديل…');
+    }
+    throw new Error(lastStatus === 0 ? 'مفيش اتصال بالنت أو جوجل مش بترد. جرب تاني.' : niceError(lastStatus, lastText));
+}
+async function genScript(key, idea) {
+    const prompt = `أنت كاتب سكريبتات لقناة "سر في دقيقة" (علم وتاريخ، من غير ظهور). اكتب فيديو رأسي 60 لـ 75 ثانية بالمصري عن: ${idea}
+القالب: سؤال مثير، سلسلة أسئلة "طب إزاي؟ / طب ليه؟" كل جواب بيفتح سؤال، تشبيه بسيط، مقارنة، نقط مرقمة 3 لـ 4، ملخص في جملة.
+القواعد: 8 لـ 10 مشاهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 18 كلمة)، caption جملة قصيرة جدا (حد أقصى 6 كلمات) تتكتب تحت الرسمة، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، draw رسمة SVG مسطحة بسيطة (viewBox 0 0 640 640) بالألوان البيج والأزرق المخضر #2f7f86 والذهبي #e0a84a والأحمر #c8553d والأسود #2b2b2b، من غير أي نص عربي جواها ومن غير خلفية. معلومات صحيحة بس، وماتألفش أرقام مش متأكد منها. ماتكتبش مشهد الافتتاحية ولا الختام، هتتضاف لوحدها.
+رجّع JSON بس: مصفوفة كائنات {voice, caption, red, draw}.`;
+    const data = await post(TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }, 'text');
+    const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+    let arr;
+    try {
+        arr = JSON.parse(txt.replace(/^```json|```$/g, '').trim());
+    }
+    catch {
+        throw new Error('الرد مش JSON سليم، جرب تاني');
+    }
+    if (!Array.isArray(arr) || arr.length < 3)
+        throw new Error('السكريبت طلع ناقص، جرب تاني');
+    const mid = arr.slice(0, 11).map((s) => {
+        const caption = String(s.caption ?? '');
+        const red = String(s.red ?? '');
+        return { voice: String(s.voice ?? ''), caption, red: caption.includes(red) ? red : '', draw: cleanSvg(String(s.draw ?? '')) };
+    });
+    const first = SAMPLE[0];
+    const last = SAMPLE[SAMPLE.length - 1];
+    return [{ ...first }, ...mid, { ...last }];
+}
+async function genVoice(key, text, voice) {
+    const data = await post(TTS_MODELS, key, {
+        contents: [{ parts: [{ text: `اقرأ بالمصري بنبرة حماسية وواضحة وسرعة متوسطة: ${text}` }] }],
+        generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
+    }, 'tts');
+    const b64 = data?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)?.inlineData?.data;
+    if (!b64)
+        throw new Error('مفيش صوت رجع من جوجل للمشهد ده');
+    return b64ToF32(b64);
+}
+const imgCache = new Map();
+function loadSvg(svg) {
+    if (!svg)
+        return Promise.resolve(null);
+    if (!imgCache.has(svg))
+        imgCache.set(svg, new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); }));
+    return imgCache.get(svg);
+}
+function wrap(ctx, words, maxW) {
+    const lines = [];
+    let cur = [];
+    for (const w of words) {
+        const test = [...cur, w].join(' ');
+        if (cur.length && ctx.measureText(test).width > maxW) {
+            lines.push(cur);
+            cur = [w];
+        }
+        else
+            cur.push(w);
+    }
+    if (cur.length)
+        lines.push(cur);
+    return lines;
+}
+const W = 720, H = 1280;
+function drawFrame(ctx, scene, img, idx, total, t) {
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(0,0,0,.06)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= W; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= H; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+    }
+    const k = Math.min(1, t / 0.5);
+    const e = 1 - Math.pow(1 - k, 3);
+    if (img) {
+        const size = 600 * (0.92 + 0.08 * e);
+        ctx.save();
+        ctx.globalAlpha = e;
+        ctx.drawImage(img, (W - size) / 2, 150 + (600 - size) / 2, size, size);
+        ctx.restore();
+    }
+    ctx.direction = 'rtl';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 54px "Noto Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif';
+    const words = scene.caption.split(/\s+/).filter(Boolean);
+    const lines = wrap(ctx, words, W - 120);
+    const lh = 78;
+    let y = 880 - ((lines.length - 1) * lh) / 2;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, t / 0.35);
+    for (const ln of lines) {
+        const space = ctx.measureText(' ').width;
+        const total = ln.reduce((a, w) => a + ctx.measureText(w).width, 0) + space * (ln.length - 1);
+        let x = W / 2 + total / 2;
+        for (const w of ln) {
+            ctx.fillStyle = scene.red && w.includes(scene.red) ? C.c : C.ink;
+            ctx.fillText(w, x, y);
+            x -= ctx.measureText(w).width + space;
+        }
+        y += lh;
+    }
+    ctx.restore();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 34px "Noto Sans Arabic",Tahoma,Arial,sans-serif';
+    ctx.fillStyle = C.a;
+    ctx.fillText('سر في دقيقة', W / 2, 1180);
+    ctx.fillStyle = C.a;
+    const bw = (W - 160) * ((idx + Math.min(1, t / ((scene.dur ?? 3)))) / total);
+    ctx.fillRect(80, 1220, W - 160, 6 / 1);
+    ctx.fillStyle = C.c;
+    ctx.fillRect(80, 1220, bw, 6);
+}
+async function renderVideo(canvas, scenes, onProgress) {
+    const ctx = canvas.getContext('2d');
+    const imgs = await Promise.all(scenes.map((s) => loadSvg(s.draw)));
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    await Promise.race([ac.resume(), new Promise((r) => setTimeout(r, 1500))]);
+    if (ac.state !== 'running')
+        throw new Error('الصوت مش شغال في المتصفح. اضغط الزرار تاني.');
+    const dest = ac.createMediaStreamDestination();
+    const durs = scenes.map((s) => (s.pcm ? s.pcm.length / SR : 3) + 0.45);
+    const starts = [];
+    let acc = 0.3;
+    for (const d of durs) {
+        starts.push(acc);
+        acc += d;
+    }
+    const total = acc + 0.3;
+    const t0 = ac.currentTime + 0.2;
+    scenes.forEach((s, i) => {
+        if (!s.pcm || !s.pcm.length)
+            return;
+        const buf = ac.createBuffer(1, s.pcm.length, SR);
+        buf.copyToChannel(s.pcm, 0);
+        const src = ac.createBufferSource();
+        src.buffer = buf;
+        src.connect(dest);
+        src.start(t0 + starts[i]);
+    });
+    const cands = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const mime = cands.find((m) => window.MediaRecorder?.isTypeSupported?.(m)) ?? '';
+    const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 3500000 } : undefined);
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data.size)
+        chunks.push(e.data); };
+    const done = new Promise((r) => { rec.onstop = () => r(); });
+    rec.start(500);
+    const begin = performance.now();
+    await new Promise((resolve) => {
+        const tick = () => {
+            const el = (performance.now() - begin) / 1000;
+            let i = starts.findIndex((s, n) => el >= s && (n === starts.length - 1 || el < starts[n + 1]));
+            if (i < 0)
+                i = el < starts[0] ? 0 : scenes.length - 1;
+            drawFrame(ctx, { ...scenes[i], dur: durs[i] }, imgs[i], i, scenes.length, Math.max(0, el - starts[i]));
+            onProgress(Math.min(1, el / total));
+            if (el >= total)
+                resolve();
+            else
+                setTimeout(tick, 33);
+        };
+        tick();
+    });
+    rec.stop();
+    await done;
+    await ac.close();
+    const type = (rec.mimeType || mime || 'video/webm').split(';')[0];
+    return { blob: new Blob(chunks, { type }), mime: type };
+}
+const $ = (id) => document.getElementById(id);
+setStatusHook(t => { $('msg').textContent = t; });
+let scenes = [], busy = false, video = null;
+const VOICES = ['Kore','Puck','Charon','Fenrir','Aoede','Zephyr'];
+$('voice').innerHTML = VOICES.map(v => `<option>${v}</option>`).join('');
+const msg = (t) => $('msg').textContent = t || '';
+const err = (e) => { $('err').textContent = e ? (e.message || e) : ''; busy = false; };
+const key = () => $('key').value.trim();
+async function preview(i) { const c = $('cv'); if (!scenes[i]) return; const img = await loadSvg(scenes[i].draw); drawFrame(c.getContext('2d'), {...scenes[i], dur: 3}, img, i, scenes.length, 1); }
+function show() {
+  $('scenes').innerHTML = '';
+  scenes.forEach((s, i) => {
+    const d = document.createElement('div'); d.className = 'sc';
+    d.innerHTML = `<b>مشهد ${i+1}</b><textarea rows="2"></textarea><input><div class="row"><button class="b2" data-a="p">شوف الشكل</button><button class="b2" data-a="l">اسمع</button><button class="b2" data-a="v">${s.pcm ? 'أعد الصوت' : 'اعمل الصوت'}</button></div>`;
+    const ta = d.querySelector('textarea'), inp = d.querySelector('input'); ta.value = s.voice; inp.value = s.caption;
+    ta.oninput = () => { s.voice = ta.value; s.pcm = null; };
+    inp.oninput = () => { s.caption = inp.value; if (!s.caption.includes(s.red)) s.red = ''; };
+    d.querySelector('[data-a=p]').onclick = () => preview(i);
+    d.querySelector('[data-a=l]').onclick = () => listen(i);
+    d.querySelector('[data-a=v]').onclick = async () => { if (!key()) return err('الصق المفتاح الأول'); try { err(''); msg('بعيد الصوت…'); s.pcm = await genVoice(key(), s.voice, $('voice').value); show(); msg('اتعاد.'); } catch (e) { err(e); } };
+    $('scenes').appendChild(d);
+  });
+  $('step2').hidden = !scenes.length; $('mk').hidden = !scenes.length;
+}
+function listen(i) { const p = scenes[i].pcm; if (!p) return err('مفيش صوت للمشهد ده لسه'); const ac = new (window.AudioContext || window.webkitAudioContext)(); const b = ac.createBuffer(1, p.length, SR); b.copyToChannel(p, 0); const s = ac.createBufferSource(); s.buffer = b; s.connect(ac.destination); s.start(); }
+$('demo').onclick = () => { err(''); scenes = SAMPLE.map(x => ({...x, pcm: silentPcm(x.voice)})); show(); msg('تجربة بصوت صامت علشان تشوف الشكل.'); preview(1); };
+$('go').onclick = async () => { err(''); if (!key()) return err('الصق مفتاح جوجل الأول'); if (!$('idea').value.trim()) return err('اكتب الفكرة'); try { msg('بكتب السكريبت…'); scenes = await genScript(key(), $('idea').value.trim()); show(); msg('السكريبت جاهز. راجعه وعدّل.'); preview(1); } catch (e) { err(e); } };
+$('allv').onclick = async () => { err(''); if (!key()) return err('الصق المفتاح الأول'); try { for (let i = 0; i < scenes.length; i++) { msg(`بعمل الصوت ${i+1} من ${scenes.length}…`); scenes[i].pcm = await genVoice(key(), scenes[i].voice, $('voice').value); } show(); msg('الصوت جاهز لكل المشاهد.'); } catch (e) { err(e); } };
+$('mk').onclick = async () => {
+  err(''); if (scenes.some(s => !s.pcm)) return err('فيه مشاهد من غير صوت. اعمل الصوت الأول.');
+  try { $('cv').scrollIntoView({block: 'center'}); msg('بصور الفيديو. سيب الشاشة شغالة.'); $('bar').hidden = false;
+    const r = await renderVideo($('cv'), scenes, p => $('bar').firstElementChild.style.width = Math.round(p * 100) + '%');
+    video = r; $('bar').hidden = true; const v = $('vid'); v.src = URL.createObjectURL(r.blob); $('res').hidden = false; msg('الفيديو جاهز. اضغط حفظ.');
+  } catch (e) { $('bar').hidden = true; err(e); }
+};
+$('save').onclick = async () => {
+  if (!video) return; const ext = video.mime.includes('mp4') ? 'mp4' : 'webm'; const f = new File([video.blob], `sir-fi-daqiqa.${ext}`, {type: video.mime});
+  try { if (navigator.canShare && navigator.canShare({files: [f]})) { await navigator.share({files: [f]}); return; } } catch (e) {}
+  const a = document.createElement('a'); a.href = URL.createObjectURL(video.blob); a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); msg('اتحمل الملف. لو مش ظاهر، شوف التنزيلات.');
+};
+</script></body></html>
