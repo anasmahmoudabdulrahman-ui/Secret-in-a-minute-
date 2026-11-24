@@ -20,6 +20,18 @@ canvas,video{width:100%;max-width:360px;display:block;margin:10px auto;border:1p
 <p class="n">المفتاح بيفضل في الصفحة دي بس. مش بيتبعت لحد غير جوجل.</p>
 <label>الفكرة</label><textarea id="idea" rows="2" placeholder="مثال: ليه السما زرقا"></textarea>
 <label>الصوت (ثابت لكل الفيديوهات، اختار مرة واحدة والصفحة تفتكره)</label><select id="voice"></select>
+<details id="set"><summary>إعدادات اختيارية (الأساسي مجاني وشغال من غيرها)</summary>
+<label>مصدر الصوت</label><select id="prov"><option value="gemini">Gemini (مجاني، الافتراضي)</option><option value="eleven">ElevenLabs (مفتاحك)</option></select>
+<div id="elbox" hidden>
+<label>مفتاح ElevenLabs</label><input id="elkey" type="password" dir="ltr" autocomplete="off" placeholder="الصقه هنا (مش بيتحفظ ولا بيتبعت لحد غير ElevenLabs)">
+<label>الصوت (Voice ID)</label><select id="elvoice"></select><input id="elvid" dir="ltr" placeholder="أو الصق Voice ID يدوي">
+<button class="b2" id="elload" style="margin-top:8px">حمّل أصواتي من ElevenLabs</button>
+<label>الموديل</label><select id="elmodel"><option value="eleven_multilingual_v2">eleven_multilingual_v2 (عربي، مستقر)</option><option value="eleven_v3">eleven_v3 (أحدث، تعبيري)</option><option value="eleven_flash_v2_5">eleven_flash_v2_5 (أسرع وأرخص)</option></select>
+<p class="n" dir="auto">الخطة المجانية: 10,000 حرف في الشهر (حوالي 10 فيديوهات). مكتبة الأصوات العامة مش متاحة من الـ API على الخطة المجانية، فاستخدم أصوات ظاهرة في "أصواتي" بعد ما تحمّلها. ElevenLabs بيرجّع توقيت الكلمات مع الصوت من غير خدمة تانية.</p></div>
+<label>توقيت الكابشنز</label><select id="tmode"><option value="est">تقديري (مجاني، الافتراضي)</option><option value="dg">Deepgram (مفتاحك، أدق)</option></select>
+<div id="dgbox" hidden><label>مفتاح Deepgram</label><input id="dgkey" type="password" dir="ltr" autocomplete="off" placeholder="الصقه هنا (مش بيتحفظ ولا بيتبعت لحد غير Deepgram)">
+<p class="n" dir="auto">Deepgram بيدي رصيد مجاني 200 دولار في الأول وبعدين بالاستخدام (https://deepgram.com/pricing). لو فشل، الأداة بتكمل بالتوقيت التقديري.</p></div>
+</details>
 <button id="go">اكتب السكريبت</button>
 <div id="step2" hidden><h2>الخطوة 2: راجع السكريبت</h2><p class="n">الافتتاحية والختام ثابتين. راجع كل معلومة من مصدرين قبل النشر.</p><div id="scenes"></div><button id="allv">اعمل الصوت لكل المشاهد</button></div>
 <h2>المعاينة</h2>
@@ -215,12 +227,98 @@ async function post(models, key, body, kind) {
     }
     throw new Error(lastStatus === 0 ? 'مفيش اتصال بالنت أو جوجل مش بترد. جرب تاني.' : niceError(lastStatus, lastText));
 }
+async function stepPost(step, models, key, body, kind) {
+    try { return await post(models, key, body, kind); }
+    catch (e) { throw new Error(step + ' فشلت: ' + (e.message || e)); }
+}
+const prov = () => $('prov').value;
+function f32ToWavBlob(pcm) {
+    const n = pcm.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const w = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, SR, true); v.setUint32(28, SR * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 32767, true);
+    return new Blob([buf], { type: 'audio/wav' });
+}
+async function elFetch(url, init, step) {
+    let last = null;
+    for (const wait of [0, 3000, 8000]) {
+        if (wait) { onStatus(step + ': بحاول تاني…'); await sleep(wait); }
+        let res;
+        try { res = await fetch(url, init); } catch (e) { last = { status: 0, text: '' }; continue; }
+        if (res.ok) return res;
+        last = { status: res.status, text: await res.text() };
+        if (![429, 500, 502, 503, 504].includes(res.status)) break;
+    }
+    return last;
+}
+function apiMsg(t) { try { const j = JSON.parse(t); return j?.detail?.message || j?.detail?.status || j?.err_msg || j?.error?.message || (typeof j.detail === 'string' ? j.detail : '') || ''; } catch (e) { return String(t || '').slice(0, 160); } }
+async function elVoice(text) {
+    const step = 'خطوة صوت ElevenLabs';
+    const k = $('elkey').value.trim(), vid = ($('elvid').value.trim() || $('elvoice').value);
+    if (!k) throw new Error(step + ': الصق مفتاح ElevenLabs في الإعدادات.');
+    if (!vid) throw new Error(step + ': اختار صوت (اضغط حمّل أصواتي) أو الصق Voice ID.');
+    const r = await elFetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(vid)}/with-timestamps?output_format=pcm_24000`, { method: 'POST', headers: { 'xi-api-key': k, 'Content-Type': 'application/json' }, body: JSON.stringify({ text, model_id: $('elmodel').value }) }, step);
+    if (!(r instanceof Response)) {
+        const st = r?.status ?? 0, m = apiMsg(r?.text);
+        if (st === 0) throw new Error(step + ' فشلت: مفيش اتصال أو ElevenLabs مش بترد.');
+        if (st === 401) throw new Error(step + ' فشلت: المفتاح غلط أو الصلاحيات ناقصة (401). ' + m);
+        if (st === 402 || /quota|credit|character/i.test(m)) throw new Error(step + ' فشلت: رصيد الحروف خلص أو الخطة مش بتسمح (' + st + '). ' + m);
+        if (st === 404 || st === 422) throw new Error(step + ' فشلت: الـ Voice ID أو الموديل غلط (' + st + '). ' + m);
+        if (st === 429) throw new Error(step + ' فشلت: طلبات كتير (429). استنى شوية.');
+        throw new Error(step + ` فشلت (${st}). ${m}`);
+    }
+    const j = await r.json();
+    if (!j.audio_base64) throw new Error(step + ' فشلت: مفيش صوت رجع.');
+    const pcm = audioToF32(j.audio_base64);
+    let wt = null;
+    const al = j.alignment || j.normalized_alignment;
+    if (al && al.characters && al.character_start_times_seconds) {
+        const ws = []; let cur = null;
+        al.characters.forEach((ch, i) => {
+            if (/\s/.test(ch)) { if (cur) { ws.push(cur); cur = null; } return; }
+            if (!cur) cur = { s: al.character_start_times_seconds[i], e: al.character_end_times_seconds[i] };
+            cur.e = al.character_end_times_seconds[i];
+        });
+        if (cur) ws.push(cur);
+        if (ws.length === text.split(/\s+/).filter(Boolean).length) wt = ws;
+    }
+    return { pcm, wt };
+}
+async function dgTimes(pcm, text) {
+    const k = $('dgkey').value.trim();
+    if (!k) throw new Error('الصق مفتاح Deepgram');
+    const res = await fetch('https://api.deepgram.com/v1/listen?model=nova-3&language=ar&punctuate=false&smart_format=false', { method: 'POST', headers: { Authorization: 'Token ' + k, 'Content-Type': 'audio/wav' }, body: f32ToWavBlob(pcm) });
+    if (!res.ok) { const t = await res.text(); throw new Error(`(${res.status}) ${apiMsg(t)}`); }
+    const j = await res.json();
+    const dg = j?.results?.channels?.[0]?.alternatives?.[0]?.words || [];
+    const n = text.split(/\s+/).filter(Boolean).length;
+    if (!dg.length) throw new Error('مفيش كلمات رجعت');
+    const m = dg.length, out = [];
+    for (let i = 0; i < n; i++) {
+        if (m === n) { out.push({ s: dg[i].start, e: dg[i].end }); continue; }
+        const a = i * m / n, b2 = (i + 1) * m / n;
+        const at = (p) => { const q = Math.min(m - 1, Math.floor(p)), f = p - q; return dg[q].start + Math.min(1, f) * (dg[q].end - dg[q].start); };
+        out.push({ s: at(a), e: Math.max(at(a) + 0.05, at(Math.min(b2, m - 0.0001))) });
+    }
+    return out;
+}
+// Makes the voice for one scene with the chosen provider, plus optional word timings.
+async function makeVoice(sc) {
+    sc.wt = null;
+    if (prov() === 'eleven') { const r = await elVoice(sc.voice); sc.pcm = r.pcm; sc.wt = r.wt; }
+    else { if (!key()) throw new Error('الصق مفتاح Gemini الأول.'); sc.pcm = await genVoice(key(), sc.voice, $('voice').value); }
+    if ($('tmode').value === 'dg' && !sc.wt) {
+        try { onStatus('Deepgram: بجيب توقيت الكلمات…'); sc.wt = await dgTimes(sc.pcm, sc.voice); }
+        catch (e) { sc.wt = null; onStatus('خطوة Deepgram فشلت (' + (e.message || e) + ')، هكمل بالتوقيت التقديري.'); }
+    }
+}
 async function genScript(key, idea) {
     const prompt = `أنت كاتب سكريبتات لقناة "سر في دقيقة" (علم وتاريخ، من غير ظهور). اكتب فيديو رأسي 60 لـ 75 ثانية بالمصري عن: ${idea}
 القالب: سؤال مثير، سلسلة أسئلة "طب إزاي؟ / طب ليه؟" كل جواب بيفتح سؤال، تشبيه بسيط، مقارنة، نقط مرقمة 3 لـ 4، ملخص في جملة.
 القواعد: 8 لـ 10 مشاهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 18 كلمة)، caption جملة قصيرة جدا (حد أقصى 6 كلمات) تتكتب تحت الرسمة، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، draw رسمة SVG مسطحة بسيطة (viewBox 0 0 640 640) بالألوان البيج والأزرق المخضر #2f7f86 والذهبي #e0a84a والأحمر #c8553d والأسود #2b2b2b، من غير أي نص عربي جواها ومن غير خلفية. معلومات صحيحة بس، وماتألفش أرقام مش متأكد منها. ماتكتبش مشهد الافتتاحية ولا الختام، هتتضاف لوحدها.
 رجّع JSON بس: مصفوفة كائنات {voice, caption, red, draw}.`;
-    const data = await post(TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 32768 } }, 'text');
+    const data = await stepPost('خطوة كتابة السكريبت', TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 32768 } }, 'text');
     const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
     if (!txt.trim()) {
         const why = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || 'غير معروف';
@@ -245,8 +343,8 @@ async function genScript(key, idea) {
     return [{ ...first }, ...mid, { ...last }];
 }
 async function genVoice(key, text, voice) {
-    const data = await post(TTS_MODELS, key, {
-        contents: [{ parts: [{ text, speech_metadata: { style: 'اقرأ بالعربي المصري بنبرة حماسية وواضحة وسرعة متوسطة' } }] }],
+    const data = await stepPost('خطوة الصوت', TTS_MODELS, key, {
+        contents: [{ parts: [{ text }] }],
         generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
     }, 'tts');
     const part = data?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData || p.inline_data);
@@ -286,10 +384,15 @@ const _wt = new WeakMap();
 // then split that span across the words by length (plus a pause after punctuation).
 function wordTimes(scene) {
     const key = scene.pcm || scene;
-    const sig = (scene.voice || '') + '|' + (scene.pcm ? scene.pcm.length : 0);
+    const sig = (scene.voice || '') + '|' + (scene.pcm ? scene.pcm.length : 0) + '|' + (scene.wt ? scene.wt.length : 0);
     const hit = _wt.get(key);
     if (hit && hit.sig === sig) return hit;
     const words = String(scene.voice || '').split(/\s+/).filter(Boolean);
+    if (scene.wt && scene.wt.length === words.length) {
+        let g = 0, inG = 0;
+        const out = words.map((w, i) => { const o = { t: w.replace(/[،,.؟?!:؛]+$/, ''), s: scene.wt[i].s, e: i + 1 < words.length ? scene.wt[i + 1].s : scene.wt[i].e + 0.3, g }; inG++; if (inG >= 3 || /[،,.؟?!:؛]$/.test(w)) { g++; inG = 0; } return o; });
+        const r0 = { sig, words: out }; _wt.set(key, r0); return r0;
+    }
     let s0 = 0, e1 = scene.pcm ? scene.pcm.length / SR : Math.max(2, Math.min(9, (scene.voice || '').length / 13));
     const p = scene.pcm;
     if (p && p.length > SR / 10) {
@@ -540,11 +643,11 @@ function show() {
     const d = document.createElement('div'); d.className = 'sc';
     d.innerHTML = `<b>مشهد ${i+1}</b><textarea rows="2"></textarea><input><div class="row"><button class="b2" data-a="p">شوف الشكل</button><button class="b2" data-a="l">اسمع</button><button class="b2" data-a="v">${s.pcm ? 'أعد الصوت' : 'اعمل الصوت'}</button></div>`;
     const ta = d.querySelector('textarea'), inp = d.querySelector('input'); ta.value = s.voice; inp.value = s.caption;
-    ta.oninput = () => { s.voice = ta.value; s.pcm = null; };
+    ta.oninput = () => { s.voice = ta.value; s.pcm = null; s.wt = null; };
     inp.oninput = () => { s.caption = inp.value; if (!s.caption.includes(s.red)) s.red = ''; };
     d.querySelector('[data-a=p]').onclick = () => preview(i);
     d.querySelector('[data-a=l]').onclick = () => listen(i);
-    d.querySelector('[data-a=v]').onclick = async () => { if (!key()) return err('الصق المفتاح الأول'); try { err(''); msg('بعيد الصوت…'); s.pcm = await genVoice(key(), s.voice, $('voice').value); show(); msg('اتعاد.'); } catch (e) { err(e); } };
+    d.querySelector('[data-a=v]').onclick = async () => { try { err(''); msg('بعيد الصوت…'); await makeVoice(s); show(); msg('اتعاد.'); } catch (e) { err(e); } };
     $('scenes').appendChild(d);
   });
   $('step2').hidden = !scenes.length; $('mk').hidden = !scenes.length;
@@ -552,7 +655,7 @@ function show() {
 function listen(i) { const p = scenes[i].pcm; if (!p) return err('مفيش صوت للمشهد ده لسه'); const ac = new (window.AudioContext || window.webkitAudioContext)(); const b = ac.createBuffer(1, p.length, SR); b.copyToChannel(p, 0); const s = ac.createBufferSource(); s.buffer = b; s.connect(ac.destination); s.start(); }
 $('demo').onclick = () => { err(''); scenes = SAMPLE.map(x => ({...x, pcm: silentPcm(x.voice)})); show(); msg('تجربة بصوت صامت علشان تشوف الشكل.'); preview(1); };
 $('go').onclick = async () => { err(''); if (!key()) return err('الصق مفتاح جوجل الأول'); if (!$('idea').value.trim()) return err('اكتب الفكرة'); try { msg('بكتب السكريبت…'); scenes = await genScript(key(), $('idea').value.trim()); show(); msg('السكريبت جاهز. راجعه وعدّل.'); preview(1); } catch (e) { err(e); } };
-$('allv').onclick = async () => { err(''); if (!key()) return err('الصق المفتاح الأول'); try { for (let i = 0; i < scenes.length; i++) { msg(`بعمل الصوت ${i+1} من ${scenes.length}…`); scenes[i].pcm = await genVoice(key(), scenes[i].voice, $('voice').value); } show(); msg('الصوت جاهز لكل المشاهد.'); } catch (e) { err(e); } };
+$('allv').onclick = async () => { err(''); try { for (let i = 0; i < scenes.length; i++) { msg(`بعمل الصوت ${i+1} من ${scenes.length}…`); await makeVoice(scenes[i]); } show(); msg('الصوت جاهز لكل المشاهد.'); } catch (e) { err(e); } };
 $('mk').onclick = async () => {
   err(''); if (scenes.some(s => !s.pcm)) return err('فيه مشاهد من غير صوت. اعمل الصوت الأول.');
   try { $('cv').scrollIntoView({block: 'center'}); msg('بصور الفيديو. سيب الشاشة شغالة.'); $('bar').hidden = false;
@@ -630,6 +733,22 @@ $('yt').onclick = async () => {
     });
     out('اترفع ✅ https://youtu.be/' + resp.id + ' (' + $('ytpriv').value + '). غيّر الخصوصية من YouTube Studio لو عايز.');
   } catch (e) { out(e.message || String(e), true); }
+};
+const savedSet = (k, d) => { try { return localStorage.getItem(k) || d; } catch (e) { return d; } };
+$('prov').value = savedSet('prov', 'gemini'); $('tmode').value = savedSet('tmode', 'est'); $('elmodel').value = savedSet('elmodel', 'eleven_multilingual_v2'); $('elvid').value = savedSet('elvid', '');
+const syncSet = () => { $('elbox').hidden = prov() !== 'eleven'; $('dgbox').hidden = $('tmode').value !== 'dg'; $('voice').parentElement; };
+['prov', 'tmode', 'elmodel'].forEach((id) => { $(id).onchange = () => { try { localStorage.setItem(id, $(id).value); } catch (e) {} syncSet(); }; });
+$('elvid').onchange = () => { try { localStorage.setItem('elvid', $('elvid').value.trim()); } catch (e) {} };
+syncSet();
+$('elload').onclick = async () => {
+  err(''); const k = $('elkey').value.trim(); if (!k) return err('خطوة تحميل الأصوات: الصق مفتاح ElevenLabs الأول.');
+  try {
+    const res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': k } });
+    if (!res.ok) return err(`خطوة تحميل الأصوات فشلت (${res.status}). ${apiMsg(await res.text())}`);
+    const j = await res.json(); const vs = j.voices || [];
+    $('elvoice').innerHTML = vs.map((v) => `<option value="${v.voice_id}">${String(v.name).replace(/</g, '')}</option>`).join('');
+    msg(vs.length ? 'اتحمل ' + vs.length + ' صوت. اختار واحد.' : 'مفيش أصوات في حسابك. الصق Voice ID يدوي.');
+  } catch (e) { err('خطوة تحميل الأصوات فشلت: مفيش اتصال.'); }
 };
 const vfile = () => { const ext = video.mime.includes('mp4') ? 'mp4' : 'webm'; return new File([video.blob], `sir-fi-daqiqa.${ext}`, {type: video.mime}); };
 $('share').onclick = async () => {
