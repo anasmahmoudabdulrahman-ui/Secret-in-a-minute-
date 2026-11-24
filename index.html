@@ -78,6 +78,34 @@ function b64ToF32(b64) {
     }
     return out;
 }
+function audioToF32(b64) {
+    const bin = atob(b64);
+    const u = new Uint8Array(bin.length);
+    for (let i = 0; i < u.length; i++) u[i] = bin.charCodeAt(i);
+    let off = 0, rate = SR;
+    if (u.length > 44 && u[0] === 0x52 && u[1] === 0x49 && u[2] === 0x46 && u[3] === 0x46) {
+        const dv = new DataView(u.buffer);
+        let p = 12;
+        off = 44;
+        while (p + 8 <= u.length) {
+            const id = String.fromCharCode(u[p], u[p+1], u[p+2], u[p+3]);
+            const sz = dv.getUint32(p + 4, true);
+            if (id === 'fmt ') rate = dv.getUint32(p + 12, true);
+            if (id === 'data') { off = p + 8; break; }
+            p += 8 + sz + (sz & 1);
+        }
+    }
+    const n = Math.floor((u.length - off) / 2);
+    const dv2 = new DataView(u.buffer, off, n * 2);
+    let out = new Float32Array(n);
+    for (let i = 0; i < n; i++) out[i] = dv2.getInt16(2 * i, true) / 32768;
+    if (rate !== SR && rate > 0) {
+        const m = Math.floor(n * SR / rate), r = new Float32Array(m);
+        for (let i = 0; i < m; i++) { const x = i * rate / SR, k = Math.floor(x), f = x - k; r[i] = (out[k] ?? 0) * (1 - f) + (out[k + 1] ?? out[k] ?? 0) * f; }
+        out = r;
+    }
+    return out;
+}
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 let onStatus = () => { };
 function setStatusHook(f) { onStatus = f; }
@@ -97,19 +125,30 @@ function niceError(status, txt) {
         return 'جوجل مشغولة دلوقتي (الضغط عليها عالي). جربت أكتر من مرة وموديل بديل. جرب تاني بعد دقيقتين.';
     if (status === 404)
         return 'الموديل مش متاح على مفتاحك. (404)';
-    return `خطأ من جوجل (${status}). جرب تاني.`;
+    return `خطأ من جوجل (${status}): ${String(m).slice(0, 200)}`;
 }
 async function callOnce(model, key, body) {
     let res;
     try {
-        res = await fetch(`${API}${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body) });
+        const ac = new AbortController();
+        const tm = setTimeout(() => ac.abort(), 90000);
+        try {
+            res = await fetch(`${API}${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body), signal: ac.signal });
+            if (res.ok) {
+                const data = await res.json();
+                clearTimeout(tm);
+                return { ok: true, status: 200, data };
+            }
+            const text = await res.text();
+            clearTimeout(tm);
+            return { ok: false, status: res.status, text };
+        }
+        finally { clearTimeout(tm); }
     }
     catch {
         return { ok: false, status: 0, text: 'network' };
     }
-    if (res.ok)
-        return { ok: true, status: 200, data: await res.json() };
-    return { ok: false, status: res.status, text: await res.text() };
+    return { ok: false, status: 0, text: 'network' };
 }
 let discovered = null;
 const preferred = {};
@@ -152,7 +191,7 @@ async function post(models, key, body, kind) {
             if (!retry)
                 break;
         }
-        if (lastStatus === 400 || lastStatus === 401 || lastStatus === 403)
+        if ((lastStatus === 400 && /API key|API_KEY/i.test(lastText)) || lastStatus === 401 || lastStatus === 403)
             throw new Error(niceError(lastStatus, lastText));
         if (mi === list.length - 1 && !extended) {
             extended = true;
@@ -170,14 +209,18 @@ async function genScript(key, idea) {
 القالب: سؤال مثير، سلسلة أسئلة "طب إزاي؟ / طب ليه؟" كل جواب بيفتح سؤال، تشبيه بسيط، مقارنة، نقط مرقمة 3 لـ 4، ملخص في جملة.
 القواعد: 8 لـ 10 مشاهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 18 كلمة)، caption جملة قصيرة جدا (حد أقصى 6 كلمات) تتكتب تحت الرسمة، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، draw رسمة SVG مسطحة بسيطة (viewBox 0 0 640 640) بالألوان البيج والأزرق المخضر #2f7f86 والذهبي #e0a84a والأحمر #c8553d والأسود #2b2b2b، من غير أي نص عربي جواها ومن غير خلفية. معلومات صحيحة بس، وماتألفش أرقام مش متأكد منها. ماتكتبش مشهد الافتتاحية ولا الختام، هتتضاف لوحدها.
 رجّع JSON بس: مصفوفة كائنات {voice, caption, red, draw}.`;
-    const data = await post(TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }, 'text');
+    const data = await post(TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 32768 } }, 'text');
     const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+    if (!txt.trim()) {
+        const why = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || 'غير معروف';
+        throw new Error('جوجل رجعت رد فاضي (السبب: ' + why + '). جرب فكرة تانية أو جرب تاني.');
+    }
     let arr;
     try {
         arr = JSON.parse(txt.replace(/^```json|```$/g, '').trim());
     }
     catch {
-        throw new Error('الرد مش JSON سليم، جرب تاني');
+        throw new Error('الرد مش JSON سليم (' + (data?.candidates?.[0]?.finishReason || '?') + '). جرب تاني.');
     }
     if (!Array.isArray(arr) || arr.length < 3)
         throw new Error('السكريبت طلع ناقص، جرب تاني');
@@ -192,13 +235,15 @@ async function genScript(key, idea) {
 }
 async function genVoice(key, text, voice) {
     const data = await post(TTS_MODELS, key, {
-        contents: [{ parts: [{ text: `اقرأ بالمصري بنبرة حماسية وواضحة وسرعة متوسطة: ${text}` }] }],
+        contents: [{ parts: [{ text, speech_metadata: { style: 'اقرأ بالعربي المصري بنبرة حماسية وواضحة وسرعة متوسطة' } }] }],
         generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
     }, 'tts');
-    const b64 = data?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)?.inlineData?.data;
+    const part = data?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData || p.inline_data);
+    const idata = part?.inlineData || part?.inline_data;
+    const b64 = idata?.data;
     if (!b64)
-        throw new Error('مفيش صوت رجع من جوجل للمشهد ده');
-    return b64ToF32(b64);
+        throw new Error('مفيش صوت رجع من جوجل للمشهد ده (' + (data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason || '?') + ')');
+    return audioToF32(b64);
 }
 const imgCache = new Map();
 function loadSvg(svg) {
@@ -348,9 +393,12 @@ let scenes = [], busy = false, video = null;
 const VOICES = ['Kore','Puck','Charon','Fenrir','Aoede','Zephyr'];
 $('voice').innerHTML = VOICES.map(v => `<option>${v}</option>`).join('');
 const msg = (t) => $('msg').textContent = t || '';
-const err = (e) => { $('err').textContent = e ? (e.message || e) : ''; busy = false; };
+const err = (e) => { $('err').textContent = e ? (e.message || String(e)) : ''; if (e) $('msg').textContent = 'حصلت مشكلة:'; busy = false; };
+window.addEventListener('error', (ev) => err('خطأ في الصفحة: ' + (ev.message || 'غير معروف')));
+window.addEventListener('unhandledrejection', (ev) => err('خطأ: ' + ((ev.reason && ev.reason.message) || ev.reason || 'غير معروف')));
 const key = () => $('key').value.trim();
-async function preview(i) { const c = $('cv'); if (!scenes[i]) return; const img = await loadSvg(scenes[i].draw); drawFrame(c.getContext('2d'), {...scenes[i], dur: 3}, img, i, scenes.length, 1); }
+async function preview(i) { try { await preview0(i); } catch (e) { err(e); } }
+async function preview0(i) { const c = $('cv'); if (!scenes[i]) return; const img = await loadSvg(scenes[i].draw); drawFrame(c.getContext('2d'), {...scenes[i], dur: 3}, img, i, scenes.length, 1); }
 function show() {
   $('scenes').innerHTML = '';
   scenes.forEach((s, i) => {
