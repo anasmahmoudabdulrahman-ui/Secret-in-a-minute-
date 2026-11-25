@@ -316,8 +316,8 @@ async function makeVoice(sc) {
 async function genScript(key, idea) {
     const prompt = `أنت كاتب سكريبتات لقناة "سر في دقيقة" (علم وتاريخ، من غير ظهور). اكتب فيديو رأسي 60 لـ 75 ثانية بالمصري عن: ${idea}
 القالب: سؤال مثير، سلسلة أسئلة "طب إزاي؟ / طب ليه؟" كل جواب بيفتح سؤال، تشبيه بسيط، مقارنة، نقط مرقمة 3 لـ 4، ملخص في جملة.
-القواعد: 8 لـ 10 مشاهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 18 كلمة)، caption جملة قصيرة جدا (حد أقصى 6 كلمات) تتكتب تحت الرسمة، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، draw رسمة SVG مسطحة بسيطة (viewBox 0 0 640 640) بالألوان البيج والأزرق المخضر #2f7f86 والذهبي #e0a84a والأحمر #c8553d والأسود #2b2b2b، من غير أي نص عربي جواها ومن غير خلفية. معلومات صحيحة بس، وماتألفش أرقام مش متأكد منها. ماتكتبش مشهد الافتتاحية ولا الختام، هتتضاف لوحدها.
-رجّع JSON بس: مصفوفة كائنات {voice, caption, red, draw}.`;
+القواعد: 8 لـ 10 مشاهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 18 كلمة)، caption جملة قصيرة جدا (حد أقصى 6 كلمات) تتكتب تحت الرسمة، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، n رقم النقطة (1 لـ 4) لو المشهد نقطة من نقط مرقمة، وإلا 0، و of عدد النقط الكلي (أو 0). draw رسمة SVG مسطحة (flat) غنية ومحددة بموضوع المشهد نفسه، مش أشكال عامة: (viewBox 0 0 640 640)، من 6 لـ 9 عناصر رئيسية متراصة فوق بعض في أول مستوى جوه <svg> مباشرة، كل عنصر <g> أو شكل لوحده (خلفية دايرة أو شكل كبير، الجسم الرئيسي، التفاصيل، شخصية مبسطة بوش لو مناسب، رموز صغيرة وأسهم وشرارات)، بالترتيب من الخلفية للأمام لأنها بتظهر واحد ورا التاني. استخدم ألوان مسطحة: بيج فاتح #fff3c4 و#e9dcc0 والأزرق المخضر #2f7f86 وفاتح منه #8cc3c8 والذهبي #e0a84a والأحمر #c8553d والأسود #2b2b2b، وخطوط سميكة بأطراف مدورة stroke-linecap=round، من غير أي نص أو حروف جواها ومن غير خلفية كاملة، والرسمة تملا المساحة بتوازن. معلومات صحيحة بس، وماتألفش أرقام مش متأكد منها. ماتكتبش مشهد الافتتاحية ولا الختام، هتتضاف لوحدها.
+رجّع JSON بس: مصفوفة كائنات {voice, caption, red, n, of, draw}.`;
     const data = await stepPost('خطوة كتابة السكريبت', TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 32768 } }, 'text');
     const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
     if (!txt.trim()) {
@@ -336,7 +336,7 @@ async function genScript(key, idea) {
     const mid = arr.slice(0, 11).map((s) => {
         const caption = String(s.caption ?? '');
         const red = String(s.red ?? '');
-        return { voice: String(s.voice ?? ''), caption, red: caption.includes(red) ? red : '', draw: cleanSvg(String(s.draw ?? '')) };
+        return { voice: String(s.voice ?? ''), caption, red: caption.includes(red) ? red : '', n: Math.max(0, Math.min(9, Number(s.n) || 0)), of: Math.max(0, Math.min(9, Number(s.of) || 0)), draw: cleanSvg(String(s.draw ?? '')) };
     });
     const first = SAMPLE[0];
     const last = SAMPLE[SAMPLE.length - 1];
@@ -355,11 +355,34 @@ async function genVoice(key, text, voice) {
     return audioToF32(b64);
 }
 const imgCache = new Map();
+function rasterSvg(svg) {
+    return new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+}
+// Splits the drawing into its top-level parts so they can pop in one after another.
+async function splitLayers(svg) {
+    try {
+        const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+        const root = doc.documentElement;
+        if (!root || root.nodeName !== 'svg' || doc.getElementsByTagName('parsererror').length) return [];
+        const ser = new XMLSerializer();
+        const common = [], parts = [];
+        for (const el of Array.from(root.children)) {
+            const n = el.nodeName.toLowerCase();
+            if (n === 'defs' || n === 'style') common.push(ser.serializeToString(el)); else if (n !== 'title' && n !== 'desc') parts.push(ser.serializeToString(el));
+        }
+        if (parts.length < 2) return [];
+        let groups = parts.map((p) => [p]);
+        while (groups.length > 8) { const per = Math.ceil(parts.length / 8); groups = []; for (let i = 0; i < parts.length; i += per) groups.push(parts.slice(i, i + per)); }
+        const head = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="640" height="640">` + common.join('');
+        const imgs = await Promise.all(groups.map((g) => rasterSvg(head + g.join('') + '</svg>')));
+        return imgs.every(Boolean) ? imgs : [];
+    } catch (e) { return []; }
+}
 function loadSvg(svg) {
     if (!svg)
         return Promise.resolve(null);
     if (!imgCache.has(svg))
-        imgCache.set(svg, new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); }));
+        imgCache.set(svg, rasterSvg(svg).then(async (im) => { if (im) im.layers = await splitLayers(svg); return im; }));
     return imgCache.get(svg);
 }
 function wrap(ctx, words, maxW) {
@@ -460,8 +483,35 @@ function drawFrame(ctx, scene, img, idx, total, t) {
         ctx.globalAlpha = Math.min(1, k * 1.6);
         ctx.translate(W / 2 + dx, 450 + dy + Math.sin(t * 2.1) * 9);
         ctx.rotate(Math.sin(t * 1.4 + idx) * 0.018 + (1 - e) * (dir % 2 ? 0.12 : -0.12));
-        ctx.drawImage(img, -size / 2, -size / 2, size, size);
+        const L = img.layers;
+        if (L && L.length > 1) {
+            const step = Math.min(0.28, 1.5 / L.length);
+            L.forEach((li, n) => {
+                const lk = Math.max(0, Math.min(1, (t - 0.12 - n * step) / 0.45));
+                if (lk <= 0) return;
+                const lb = 1 + c3 * Math.pow(lk - 1, 3) + c1 * Math.pow(lk - 1, 2);
+                const sc = (0.55 + 0.45 * lb);
+                ctx.save();
+                ctx.globalAlpha = Math.min(1, lk * 2.2);
+                ctx.translate(0, (1 - lk) * 50 + Math.sin(t * 2.4 + n * 1.1) * (n ? 6 : 2));
+                ctx.rotate(Math.sin(t * 1.7 + n) * (n ? 0.012 : 0.004));
+                ctx.scale(sc, sc);
+                ctx.drawImage(li, -size / 2, -size / 2, size, size);
+                ctx.restore();
+            });
+        } else ctx.drawImage(img, -size / 2, -size / 2, size, size);
         ctx.restore();
+    }
+    // numbered point counter: badge plus progress dots
+    if (scene.n > 0) {
+        const pk = Math.min(1, t / 0.4), pb = 1 + 2.7 * Math.pow(pk - 1, 3) + 1.7 * Math.pow(pk - 1, 2);
+        ctx.save(); ctx.translate(100, 90); ctx.scale(pb, pb);
+        ctx.fillStyle = C.c; ctx.beginPath(); ctx.arc(0, 0, 44, 0, 7); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 52px "Noto Sans Arabic",Tahoma,Arial,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.direction = 'ltr';
+        ctx.fillText(String(scene.n), 0, 3); ctx.restore();
+        const tot = scene.of >= scene.n ? scene.of : scene.n;
+        if (tot > 1) for (let d = 0; d < tot; d++) { ctx.globalAlpha = Math.min(1, t / 0.4); ctx.fillStyle = d < scene.n ? C.c : 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.arc(W / 2 + (d - (tot - 1) / 2) * 34, 150, d === scene.n - 1 ? 11 : 8, 0, 7); ctx.fill(); }
+        ctx.globalAlpha = 1;
     }
     // word-synced karaoke captions
     const tm = wordTimes(scene);
@@ -477,12 +527,15 @@ function drawFrame(ctx, scene, img, idx, total, t) {
         let x = W / 2 + totalW / 2;
         grp.forEach((w, n) => {
             const active = w === tm.words[cur];
-            const pop = active ? 1 + 0.1 * Math.max(0, 1 - (t - w.s) / 0.15) : 1;
+            const isKey = !!(scene.red && w.t.includes(scene.red));
+            const pop = active ? 1 + (isKey ? 0.28 : 0.1) * Math.max(0, 1 - (t - w.s) / (isKey ? 0.3 : 0.15)) : 1;
             ctx.save();
             ctx.translate(x - wid[n] / 2, 900); ctx.scale(pop, pop);
             if (active) { ctx.fillStyle = C.c; const bw = wid[n] + pad * 2, bh = 88; ctx.beginPath(); ctx.roundRect(-bw / 2, -bh / 2, bw, bh, 20); ctx.fill(); }
-            ctx.fillStyle = active ? '#fff' : C.ink; ctx.textAlign = 'center';
+            ctx.fillStyle = active ? '#fff' : (isKey ? C.c : C.ink); ctx.textAlign = 'center';
             ctx.fillText(w.t, 0, 0);
+            if (isKey && !active) { const up = Math.min(1, Math.max(0, (t - w.s) / 0.35)); ctx.strokeStyle = C.c; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); for (let q = 0; q <= 20 * up; q++) { const xx = wid[n] / 2 - (q / 20) * wid[n]; const yy = 40 + Math.sin(q * 1.2) * 4; q ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); } ctx.stroke(); }
+            if (isKey && active) { const sp = (t - w.s); for (let q = 0; q < 6; q++) { const a = q * 1.047 + 0.3, r = 70 + sp * 120; ctx.globalAlpha = Math.max(0, 1 - sp / 0.6); ctx.fillStyle = C.b; ctx.beginPath(); ctx.arc(Math.cos(a) * (wid[n] / 2 + r * 0.6), Math.sin(a) * r * 0.5, 6, 0, 7); ctx.fill(); } ctx.globalAlpha = 1; }
             ctx.restore();
             x -= wid[n] + space;
         });
@@ -496,6 +549,13 @@ function drawFrame(ctx, scene, img, idx, total, t) {
     ctx.fillRect(80, 1220, W - 160, 6 / 1);
     ctx.fillStyle = C.c;
     ctx.fillRect(80, 1220, bw, 6);
+    // scene transition: a colored band wipes across at the start of each scene
+    if (idx > 0 && t < 0.42) {
+        const p = t / 0.42, e2 = p * p * (3 - 2 * p);
+        const edge = e2 < 0.5 ? 2 * e2 : 2 * e2 - 1;
+        ctx.fillStyle = idx % 2 ? C.a : C.b;
+        if (e2 < 0.5) ctx.fillRect(W * (1 - edge), 0, W * edge, H); else ctx.fillRect(0, 0, W * (1 - edge), H);
+    }
 }
 async function renderRecorder(canvas, scenes, onProgress) {
     const ctx = canvas.getContext('2d');
@@ -555,7 +615,7 @@ async function renderRecorder(canvas, scenes, onProgress) {
     await ac.close();
     const full = rec.mimeType || mime || 'video/webm';
     const type = full.split(';')[0];
-    return { blob: new Blob(chunks, { type }), mime: type, safe: /avc1/i.test(full) && /mp4a/i.test(full) && type === 'video/mp4' };
+    return { blob: new Blob(chunks, { type }), mime: type, safe: false, vfr: true };
 }
 function loadScript(src) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('load ' + src)); document.head.appendChild(el); }); }
 async function loadMuxer() {
@@ -563,6 +623,25 @@ async function loadMuxer() {
     const urls = ['https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js', 'https://unpkg.com/mp4-muxer@5.1.3/build/mp4-muxer.js'];
     for (const u of urls) { try { await loadScript(u); if (window.Mp4Muxer) return; } catch (e) {} }
     throw new Error('ماقدرتش أحمل مكتبة MP4');
+}
+let ffInst = null;
+async function getFF() {
+    if (ffInst) return ffInst;
+    const B = 'https://cdn.jsdelivr.net/npm/';
+    await loadScript(B + '@ffmpeg/util@0.12.1/dist/umd/index.js'); await loadScript(B + '@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js');
+    const { toBlobURL } = FFmpegUtil; const ff = new FFmpegWASM.FFmpeg();
+    await ff.load({ classWorkerURL: await toBlobURL(B + '@ffmpeg/ffmpeg@0.12.10/dist/umd/814.ffmpeg.js', 'text/javascript'), coreURL: await toBlobURL(B + '@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js', 'text/javascript'), wasmURL: await toBlobURL(B + '@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm', 'application/wasm') });
+    ffInst = ff; return ff;
+}
+// video stream is copied untouched (constant 30 fps from WebCodecs); only the audio is encoded to AAC
+async function ffmpegMux(videoBytes, pcm) {
+    const ff = await getFF();
+    await ff.writeFile('v.mp4', videoBytes);
+    await ff.writeFile('a.wav', new Uint8Array(await f32ToWavBlob(pcm).arrayBuffer()));
+    const code = await ff.exec(['-i', 'v.mp4', '-i', 'a.wav', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '96k', '-ar', '44100', '-movflags', '+faststart', '-shortest', 'o.mp4']);
+    if (code !== 0) throw new Error('دمج الصوت فشل (' + code + ')');
+    const d = await ff.readFile('o.mp4');
+    return new Blob([d.buffer], { type: 'video/mp4' });
 }
 // Real H.264 + AAC MP4 through WebCodecs. Faster than real time, screen can sleep.
 async function renderMp4(canvas, scenes, onProgress) {
@@ -581,19 +660,19 @@ async function renderMp4(canvas, scenes, onProgress) {
     }
     if (!vcfg) throw new Error('H.264 مش متاح');
     const acfg = { codec: 'mp4a.40.2', sampleRate: SR, numberOfChannels: 1, bitrate: 96000 };
-    const ar = await AudioEncoder.isConfigSupported(acfg);
-    if (!ar.supported) throw new Error('AAC مش متاح');
-    const muxer = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: 'avc', width: W0, height: H0 }, audio: { codec: 'aac', numberOfChannels: 1, sampleRate: SR }, fastStart: 'in-memory' });
+    let aacOk = false;
+    try { aacOk = !!(await AudioEncoder.isConfigSupported(acfg)).supported; } catch (e) {}
+    const muxer = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: 'avc', width: W0, height: H0, frameRate: FPS }, ...(aacOk ? { audio: { codec: 'aac', numberOfChannels: 1, sampleRate: SR } } : {}), fastStart: 'in-memory' });
     let fail = null;
     const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: (e) => { fail = e; } });
     venc.configure(vcfg);
-    const aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: (e) => { fail = e; } });
-    aenc.configure(acfg);
+    const aenc = aacOk ? new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: (e) => { fail = e; } }) : null;
+    if (aenc) aenc.configure(acfg);
     // audio
     const n = Math.ceil(total * SR), pcm = new Float32Array(n);
     scenes.forEach((s, i) => { if (s.pcm) pcm.set(s.pcm.subarray(0, Math.max(0, Math.min(s.pcm.length, n - Math.round(starts[i] * SR)))), Math.round(starts[i] * SR)); });
     const CH = 4800;
-    for (let off = 0; off < n; off += CH) {
+    for (let off = 0; aenc && off < n; off += CH) {
         const len = Math.min(CH, n - off);
         const ad = new AudioData({ format: 'f32', sampleRate: SR, numberOfFrames: len, numberOfChannels: 1, timestamp: Math.round(off * 1e6 / SR), data: pcm.subarray(off, off + len) });
         aenc.encode(ad); ad.close();
@@ -613,10 +692,13 @@ async function renderMp4(canvas, scenes, onProgress) {
         if (fail) throw fail;
         if (f % 10 === 0) { onProgress(f / frames); await sleep(0); }
     }
-    await venc.flush(); await aenc.flush();
+    await venc.flush(); if (aenc) await aenc.flush();
     if (fail) throw fail;
     muxer.finalize();
-    return { blob: new Blob([muxer.target.buffer], { type: 'video/mp4' }), mime: 'video/mp4', safe: true };
+    if (aacOk) return { blob: new Blob([muxer.target.buffer], { type: 'video/mp4' }), mime: 'video/mp4', safe: true };
+    onStatus('المتصفح مفيهوش مُشفّر AAC، بضيف الصوت بأداة التحويل (بيحمّل حوالي 30 ميجا)…');
+    const blob = await ffmpegMux(new Uint8Array(muxer.target.buffer), pcm);
+    return { blob, mime: 'video/mp4', safe: true };
 }
 async function renderVideo(canvas, scenes, onProgress) {
     try { return await renderMp4(canvas, scenes, onProgress); }
@@ -664,7 +746,7 @@ $('mk').onclick = async () => {
     const ext = r.mime.includes('mp4') ? 'mp4' : 'webm'; $('dl').href = url; $('dl').download = `sir-fi-daqiqa.${ext}`;
     const f0 = new File([r.blob], `sir-fi-daqiqa.${ext}`, {type: r.mime}); $('share').hidden = !(navigator.canShare && navigator.canShare({files: [f0]}));
     $('conv').hidden = !!r.safe;
-    $('fmt').textContent = r.safe ? `الصيغة: MP4 (H.264 + AAC) تشتغل في المعرض وواتساب ويوتيوب. الحجم ${(r.blob.size/1048576).toFixed(1)} ميجا.` : `الفيديو اتسجل بصيغة (${ext}) ممكن واتساب مايقبلهاش. اضغط "حوّل لـ MP4 متوافق" تحت (محتاج نت وبياخد كام دقيقة).`;
+    $('fmt').textContent = r.safe ? `الصيغة: MP4 (H.264 + AAC) تشتغل في المعرض وواتساب ويوتيوب. الحجم ${(r.blob.size/1048576).toFixed(1)} ميجا.` : `الفيديو اتسجل بالتسجيل المباشر (${ext}) وممكن مدته تظهر غلط أو واتساب مايقبلهوش. اضغط "حوّل لـ MP4 متوافق" تحت (محتاج نت وبياخد كام دقيقة).`;
     msg('الفيديو جاهز. شغله من فوق، وبعدين اشترك أو حمّل من الزراير تحت.'); $('res').scrollIntoView({behavior:'smooth'});
   } catch (e) { $('bar').hidden = true; err(e); }
 };
@@ -680,7 +762,7 @@ $('conv').onclick = async () => {
     const inName = video.mime.includes('mp4') ? 'in.mp4' : 'in.webm';
     await ff.writeFile(inName, new Uint8Array(await video.blob.arrayBuffer()));
     msg('بحوّل لـ MP4…');
-    const code = await ff.exec(['-i', inName, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '27', '-vf', 'scale=out_range=tv,format=yuv420p', '-r', '30', '-c:a', 'aac', '-b:a', '96k', '-ar', '44100', '-movflags', '+faststart', 'out.mp4']);
+    const code = await ff.exec(['-i', inName, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '27', '-vf', 'fps=30,scale=out_range=tv,format=yuv420p', '-fps_mode', 'cfr', '-r', '30', '-c:a', 'aac', '-af', 'aresample=async=1', '-b:a', '96k', '-ar', '44100', '-movflags', '+faststart', 'out.mp4']);
     if (code !== 0) throw new Error('التحويل فشل (' + code + ')');
     const data = await ff.readFile('out.mp4');
     const blob = new Blob([data.buffer], { type: 'video/mp4' });
