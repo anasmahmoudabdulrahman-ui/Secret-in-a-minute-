@@ -38,7 +38,7 @@ canvas,video{width:100%;max-width:360px;display:block;margin:10px auto;border:1p
 <canvas id="cv" width="720" height="1280"></canvas><div id="bar" hidden><i></i></div>
 <button id="mk" hidden>صوّر الفيديو</button>
 <p class="n" id="msg" role="status" dir="auto"></p><p class="e" id="err" role="alert" dir="auto"></p>
-<div id="res" hidden><video id="vid" controls playsinline></video><p class="n" id="fmt" dir="auto"></p>
+<div id="res" hidden><video id="vid" controls playsinline></video><p class="n" id="fmt" dir="auto"></p><p class="e" id="dwarn" dir="auto" role="alert"></p>
 <button id="conv" hidden>حوّل لـ MP4 متوافق مع واتساب</button>
 <button id="share" hidden>مشاركة (واتساب وغيره)</button>
 <button id="save">تحميل الفيديو</button>
@@ -545,7 +545,7 @@ function drawFrame(ctx, scene, img, idx, total, t) {
     ctx.fillStyle = C.a;
     ctx.fillText('سر في دقيقة', W / 2, 1180);
     ctx.fillStyle = C.a;
-    const bw = (W - 160) * ((idx + Math.min(1, t / ((scene.dur ?? 3)))) / total);
+    const bw = (W - 160) * (scene.prog ?? ((idx + Math.min(1, t / ((scene.dur ?? 3)))) / total));
     ctx.fillRect(80, 1220, W - 160, 6 / 1);
     ctx.fillStyle = C.c;
     ctx.fillRect(80, 1220, bw, 6);
@@ -601,7 +601,7 @@ async function renderRecorder(canvas, scenes, onProgress) {
             let i = starts.findIndex((s, n) => el >= s && (n === starts.length - 1 || el < starts[n + 1]));
             if (i < 0)
                 i = el < starts[0] ? 0 : scenes.length - 1;
-            drawFrame(ctx, { ...scenes[i], dur: durs[i] }, imgs[i], i, scenes.length, Math.max(0, el - starts[i]));
+            drawFrame(ctx, { ...scenes[i], dur: durs[i], prog: Math.min(1, el / total) }, imgs[i], i, scenes.length, Math.max(0, el - starts[i]));
             onProgress(Math.min(1, el / total));
             if (el >= total)
                 resolve();
@@ -615,7 +615,7 @@ async function renderRecorder(canvas, scenes, onProgress) {
     await ac.close();
     const full = rec.mimeType || mime || 'video/webm';
     const type = full.split(';')[0];
-    return { blob: new Blob(chunks, { type }), mime: type, safe: false, vfr: true };
+    return { blob: new Blob(chunks, { type }), mime: type, safe: false, vfr: true, expected: total };
 }
 function loadScript(src) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('load ' + src)); document.head.appendChild(el); }); }
 async function loadMuxer() {
@@ -685,7 +685,7 @@ async function renderMp4(canvas, scenes, onProgress) {
         const el = f / FPS;
         let i = starts.findIndex((st, k) => el >= st && (k === starts.length - 1 || el < starts[k + 1]));
         if (i < 0) i = el < starts[0] ? 0 : scenes.length - 1;
-        drawFrame(ctx, { ...scenes[i], dur: durs[i] }, imgs[i], i, scenes.length, Math.max(0, el - starts[i]));
+        drawFrame(ctx, { ...scenes[i], dur: durs[i], prog: Math.min(1, el / total) }, imgs[i], i, scenes.length, Math.max(0, el - starts[i]));
         const vf = new VideoFrame(canvas, { timestamp: Math.round(f * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
         venc.encode(vf, { keyFrame: f % 60 === 0 }); vf.close();
         while (venc.encodeQueueSize > 8) { await sleep(5); if (fail) break; }
@@ -695,15 +695,34 @@ async function renderMp4(canvas, scenes, onProgress) {
     await venc.flush(); if (aenc) await aenc.flush();
     if (fail) throw fail;
     muxer.finalize();
-    if (aacOk) return { blob: new Blob([muxer.target.buffer], { type: 'video/mp4' }), mime: 'video/mp4', safe: true };
+    if (aacOk) return { blob: new Blob([muxer.target.buffer], { type: 'video/mp4' }), mime: 'video/mp4', safe: true, expected: total };
     onStatus('المتصفح مفيهوش مُشفّر AAC، بضيف الصوت بأداة التحويل (بيحمّل حوالي 30 ميجا)…');
     const blob = await ffmpegMux(new Uint8Array(muxer.target.buffer), pcm);
-    return { blob, mime: 'video/mp4', safe: true };
+    return { blob, mime: 'video/mp4', safe: true, expected: total };
 }
 async function renderVideo(canvas, scenes, onProgress) {
     try { return await renderMp4(canvas, scenes, onProgress); }
     catch (e) { console.warn('mp4 path failed', e); onStatus('تصوير MP4 المباشر مش متاح (' + (e.message || e) + ')، بجرب الطريقة التانية…'); window.__mp4fail = String(e && e.message || e); }
     return renderRecorder(canvas, scenes, onProgress);
+}
+function probeDuration(blob) {
+    return new Promise((res) => {
+        const v = document.createElement('video'); v.preload = 'metadata'; v.muted = true;
+        const url = URL.createObjectURL(blob); let done = false;
+        const fin = (d) => { if (done) return; done = true; URL.revokeObjectURL(url); res(d); };
+        v.onloadedmetadata = () => fin(v.duration); v.onerror = () => fin(NaN); setTimeout(() => fin(NaN), 8000);
+        v.src = url;
+    });
+}
+// Compares the real file length with the length the tool meant to render.
+async function checkDuration(r) {
+    const el = $('dwarn'); el.textContent = '';
+    if (!r.expected) return;
+    const d = await probeDuration(r.blob);
+    if (!isFinite(d)) { if (r.mime.includes('webm')) el.textContent = 'ملاحظة: ملف WebM مابيقولش مدته للمشغل، فمدته ممكن تظهر غلط. اضغط "حوّل لـ MP4" علشان المدة تتظبط.'; return; }
+    if (Math.abs(d - r.expected) > Math.max(1, r.expected * 0.03)) {
+        el.textContent = `تحذير: مدة الملف ${d.toFixed(1)} ثانية لكن المفروض ${r.expected.toFixed(1)} ثانية. ممكن الفيديو يتقص أو المدة تظهر غلط. اعمل الفيديو تاني وراجعه قبل ما تنشره.`;
+    }
 }
 const $ = (id) => document.getElementById(id);
 setStatusHook(t => { $('msg').textContent = t; });
@@ -742,7 +761,7 @@ $('mk').onclick = async () => {
   err(''); if (scenes.some(s => !s.pcm)) return err('فيه مشاهد من غير صوت. اعمل الصوت الأول.');
   try { $('cv').scrollIntoView({block: 'center'}); msg('بصور الفيديو. سيب الشاشة شغالة.'); $('bar').hidden = false;
     const r = await renderVideo($('cv'), scenes, p => $('bar').firstElementChild.style.width = Math.round(p * 100) + '%');
-    video = r; $('bar').hidden = true; const v = $('vid'); const url = URL.createObjectURL(r.blob); v.src = url; $('res').hidden = false; if (!$('yttitle').value) $('yttitle').value = scenes?.[1]?.caption || '';
+    video = r; $('bar').hidden = true; msg('بتأكد من مدة الفيديو…'); await checkDuration(r); const v = $('vid'); const url = URL.createObjectURL(r.blob); v.src = url; $('res').hidden = false; if (!$('yttitle').value) $('yttitle').value = scenes?.[1]?.caption || '';
     const ext = r.mime.includes('mp4') ? 'mp4' : 'webm'; $('dl').href = url; $('dl').download = `sir-fi-daqiqa.${ext}`;
     const f0 = new File([r.blob], `sir-fi-daqiqa.${ext}`, {type: r.mime}); $('share').hidden = !(navigator.canShare && navigator.canShare({files: [f0]}));
     $('conv').hidden = !!r.safe;
@@ -766,7 +785,8 @@ $('conv').onclick = async () => {
     if (code !== 0) throw new Error('التحويل فشل (' + code + ')');
     const data = await ff.readFile('out.mp4');
     const blob = new Blob([data.buffer], { type: 'video/mp4' });
-    video = { blob, mime: 'video/mp4', safe: true };
+    video = { blob, mime: 'video/mp4', safe: true, expected: video.expected };
+    await checkDuration(video);
     const url = URL.createObjectURL(blob); $('vid').src = url; $('dl').href = url; $('dl').download = 'sir-fi-daqiqa.mp4';
     $('conv').hidden = true; $('fmt').textContent = `اتحول لـ MP4 (H.264 + AAC). الحجم ${(blob.size/1048576).toFixed(1)} ميجا.`;
     const f0 = new File([blob], 'sir-fi-daqiqa.mp4', { type: 'video/mp4' }); $('share').hidden = !(navigator.canShare && navigator.canShare({ files: [f0] }));
