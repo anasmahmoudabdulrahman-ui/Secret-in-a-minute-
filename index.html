@@ -337,80 +337,103 @@ async function dgTimes(pcm, text) {
     return out;
 }
 // Makes the voice for one scene with the chosen provider, plus optional word timings.
+// Cleans TTS audio: drops a loud noise burst before the speech, trims long silences, fades the edges, limits the peak.
+function cleanPcm(x) {
+    if (!x || x.length < SR / 2) return x;
+    const win = Math.round(SR * 0.01), nw = Math.floor(x.length / win), act = new Array(nw), rms = new Array(nw);
+    for (let i = 0; i < nw; i++) { let m = 0, e = 0; for (let k = i * win; k < (i + 1) * win; k++) { const v = Math.abs(x[k]); if (v > m) m = v; e += v * v; } act[i] = m > 0.012; rms[i] = Math.sqrt(e / win); }
+    const runs = []; for (let i = 0; i < nw;) { if (!act[i]) { i++; continue; } let j = i; while (j < nw && act[j]) j++; runs.push([i, j]); i = j; }
+    if (!runs.length) return x;
+    // merge runs separated by short gaps (< 60 ms) into clusters
+    const cl = []; for (const r of runs) { const l = cl[cl.length - 1]; if (l && r[0] - l[1] < 6) l[1] = r[1]; else cl.push([r[0], r[1]]); }
+    const mean = (a, b) => { let t = 0, n = 0; for (let i = a; i < b && i < nw; i++) { t += rms[i]; n++; } return n ? t / n : 0; };
+    let start = cl[0][0];
+    if (cl.length > 1 && cl[0][1] - cl[0][0] <= 30 && cl[1][0] - cl[0][1] >= 15) {
+        const after = mean(cl[1][0], cl[1][0] + 50);
+        if (after > 0 && mean(cl[0][0], cl[0][1]) > 2.5 * after) start = cl[1][0];
+    }
+    const end = cl[cl.length - 1][1];
+    const a0 = Math.max(0, (start - 6) * win), b0 = Math.min(x.length, (end + 8) * win);
+    const y = x.slice(a0, b0);
+    const fi = Math.min(y.length, Math.round(SR * 0.008)), fo = Math.min(y.length, Math.round(SR * 0.02));
+    for (let i = 0; i < fi; i++) y[i] *= i / fi;
+    for (let i = 0; i < fo; i++) y[y.length - 1 - i] *= i / fo;
+    let pk = 0; for (let i = 0; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]));
+    if (pk > 0.9) { const g = 0.9 / pk; for (let i = 0; i < y.length; i++) y[i] *= g; }
+    return y;
+}
 async function makeVoice(sc) {
     sc.wt = null;
     if (prov() === 'eleven') { const r = await elVoice(sc.voice); sc.pcm = r.pcm; sc.wt = r.wt; }
     else { if (!key()) throw new Error('الصق مفتاح Gemini الأول.'); sc.pcm = await genVoice(key(), sc.voice, $('voice').value); }
+    if (!sc.wt && sc.pcm) sc.pcm = cleanPcm(sc.pcm);
     if ($('tmode').value === 'dg' && !sc.wt) {
         try { onStatus('Deepgram: بجيب توقيت الكلمات…'); sc.wt = await dgTimes(sc.pcm, sc.voice); }
         catch (e) { sc.wt = null; onStatus('خطوة Deepgram فشلت (' + (e.message || e) + ')، هكمل بالتوقيت التقديري.'); }
     }
 }
+function shapeCount(svg) { try { const d = new DOMParser().parseFromString(svg, 'image/svg+xml'); if (d.getElementsByTagName('parsererror').length) return 0; return d.querySelectorAll('circle,ellipse,rect,path,line,polyline,polygon').length; } catch (e) { return 0; } }
+function cleanMaster(raw) {
+    let s0 = cleanSvg(raw);
+    if (!s0) return '';
+    s0 = s0.replace(/viewBox="[^"]*"/, 'viewBox="0 0 1000 1000"').replace(/<svg([^>]*?)\swidth="[^"]*"/, '<svg$1').replace(/<svg([^>]*?)\sheight="[^"]*"/, '<svg$1');
+    return s0.replace('<svg', '<svg data-master="1" width="1600" height="1600"');
+}
+const MASTER_DEMO = cleanMaster(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000"><g id="sky"><rect x="0" y="0" width="1000" height="560" fill="#9fc3c9" stroke="#2b2b2b" stroke-width="3"/><rect x="0" y="360" width="1000" height="200" fill="#b8d3d3"/></g><g id="sun"><circle cx="160" cy="150" r="90" fill="#e8a58c" stroke="#2b2b2b" stroke-width="3"/><circle cx="160" cy="150" r="55" fill="#f2c9b5"/></g><g id="rays"><path d="M250 180 L560 400 M250 150 L600 300 M240 210 L520 480" stroke="#c97d62" stroke-width="5" fill="none" stroke-dasharray="14 10"/></g><g id="air"><circle cx="560" cy="400" r="34" fill="#8a9a5b" stroke="#2b2b2b" stroke-width="3"/><circle cx="640" cy="300" r="26" fill="#8a9a5b" stroke="#2b2b2b" stroke-width="3"/><circle cx="520" cy="480" r="30" fill="#8a9a5b" stroke="#2b2b2b" stroke-width="3"/><circle cx="760" cy="420" r="24" fill="#8a9a5b" stroke="#2b2b2b" stroke-width="3"/></g><g id="blue"><path d="M560 400 L720 600 M640 300 L820 560 M520 480 L640 640" stroke="#4a7fa8" stroke-width="6" fill="none"/></g><g id="ground"><path d="M0 560 H1000 V1000 H0Z" fill="#b5724f" stroke="#2b2b2b" stroke-width="3"/><path d="M0 620 H1000" stroke="#8d5638" stroke-width="4"/></g><g id="eye"><ellipse cx="760" cy="700" rx="150" ry="85" fill="#f7f1e1" stroke="#2b2b2b" stroke-width="4"/><circle cx="760" cy="700" r="55" fill="#4a7fa8" stroke="#2b2b2b" stroke-width="3"/><circle cx="760" cy="700" r="24" fill="#2b2b2b"/><circle cx="742" cy="682" r="9" fill="#fff"/></g><g id="eyedetail"><path d="M640 700 q120 -120 240 0" fill="none" stroke="#2b2b2b" stroke-width="3"/><path d="M640 700 q120 120 240 0" fill="none" stroke="#2b2b2b" stroke-width="3"/><path d="M180 820 H420 M180 860 H380" stroke="#8d5638" stroke-width="5"/></g></svg>`);
+const MASTER_FOCUS = (k) => [{ x: 500, y: 500, z: 1 }, { x: 160, y: 150, z: 2.2 }, { x: 600, y: 400, z: 2.2 }, { x: 760, y: 700, z: 2.4 }][k % 4];
 async function genScript(key, idea) {
-    const prompt = `أنت كاتب سكريبتات لقناة "سر في دقيقة" (علم وتاريخ، من غير ظهور). اكتب فيديو رأسي 60 لـ 75 ثانية بالمصري عن: ${idea}
-القالب (ستايل "من جوا"): سؤال مثير، سلسلة أسئلة "طب إزاي؟ / طب ليه؟" كل جواب بيفتح سؤال، تشبيه بسيط، مقارنة، نقط مرقمة 3 لـ 4، ملخص في جملة. بعد أول مشهد قول جملة تشويق بتفتح حلقة مفتوحة (مثلا "وفي الآخر هقولك المفاجأة اللي محدش بيقولها") والمشهد قبل الأخير لازم يكون هو المفاجأة أو الإجابة اللي وعدت بيها. كل مشهد لازم يجيب معلومة جديدة أو يقلب توقع، من غير حشو ومن غير تكرار. الفيديو كله 50 لـ 65 ثانية. كل المشاهد بتشرح نفس الجسم أو الجهاز أو الظاهرة من جوا، ومشهد بعد مشهد بنركز على جزء جديد منه (زي كاميرا بتدخل جواه). لو فيه رقم حقيقي في المشهد (سرعة، حجم، عدد) حطه في stat.
-القواعد: 10 لـ 13 مشهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 12 كلمة، والمشهد بيتقرا في 4 لـ 5 ثواني)، caption جملة قصيرة جدا (حد أقصى 6 كلمات) تتكتب تحت الرسمة، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، n رقم النقطة (1 لـ 4) لو المشهد نقطة من نقط مرقمة، وإلا 0، و of عدد النقط الكلي (أو 0). draw رسمة SVG مسطحة (flat) غنية ومحددة بموضوع المشهد نفسه، مش أشكال عامة: (viewBox 0 0 640 640)، من 6 لـ 9 عناصر رئيسية متراصة فوق بعض في أول مستوى جوه <svg> مباشرة، كل عنصر <g> أو شكل لوحده (خلفية دايرة أو شكل كبير، الجسم الرئيسي، التفاصيل، شخصية مبسطة بوش لو مناسب، رموز صغيرة وأسهم وشرارات)، بالترتيب من الخلفية للأمام لأنها بتظهر واحد ورا التاني. استخدم ألوان مسطحة: بيج فاتح #fff3c4 و#e9dcc0 والأزرق المخضر #2f7f86 وفاتح منه #8cc3c8 والذهبي #e0a84a والأحمر #c8553d والأسود #2b2b2b، وتعبئة ألوان هادية مطفية مع خط خارجي رفيع غامق stroke="#2b2b2b" stroke-width="3" وتفاصيل دقيقة زي رسم تشريحي علمي (خطوط ظل رفيعة، نقط، عروق، طبقات)، من غير أي نص أو حروف جواها ومن غير خلفية كاملة، والرسمة تملا المساحة بتوازن. معلومات صحيحة بس، وماتألفش أرقام مش متأكد منها. ماتكتبش مشهد الافتتاحية ولا الختام، هتتضاف لوحدها.
-وفوق المشاهد اكتب hook: سؤال أو جملة صدمة قصيرة جدا (حد أقصى 8 كلمات) تتقال وتتكتب في أول 3 ثواني وتشد المشاهد فورا، تكون أقوى حاجة في الفيديو ومرتبطة بالفكرة نفسها، و hookRed كلمة واحدة من الـ hook هي اللي تتلوّن بالأحمر.
-قواعد الهوك: خليه بواحدة من الصيغ دي: رقم ضخم مع حالة متطرفة (مثلا "اتعمل منه 100 مليون... وبيشتغل حتى لو اتدفن في الطين")، رقم أو حقيقة صادمة، "كلهم غلطانين في...", "لو عملت كذا هيحصل كذا", أو سؤال عن حاجة شايفها كل يوم ومش فاهمها. من غير مقدمات ومن غير "في الفيديو ده".
-كمان لكل مشهد (غير الهوك): labels مصفوفة من 0 لـ 3 تسميات قصيرة جدا (كلمة أو كلمتين بالعربي) بتشاور على أجزاء الرسمة زي رسمة قطاع من جوا: كل واحدة {t: النص, x: رقم 0 لـ 640, y: رقم 0 لـ 640} مكان الجزء في الرسمة. وstamp شارة حمرا قصيرة جدا فوق الرسمة (رقم أو نسبة أو كلمة، مثلا "80%" أو "30 مل" أو "الفرق؟" أو "نادر") في المشاهد المهمة بس، وإلا اتركه فاضي.
-وكمان topic: اسم الموضوع في كلمتين أو تلاتة (مثلا "جسم الإنسان")، وفي المشاهد اللي فيها رقم حقيقي stat: {t: اسم القيمة بكلمتين, v: الرقم, u: الوحدة} وإلا اتركه فاضي.
-رجّع JSON بس: كائن {hook, hookRed, topic, scenes: مصفوفة كائنات {voice, caption, red, n, of, labels, stamp, stat, draw}}.`;
-    const data = await stepPost('خطوة كتابة السكريبت', TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 32768 } }, 'text');
-    const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-    if (!txt.trim()) {
-        const why = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || 'غير معروف';
-        throw new Error('جوجل رجعت رد فاضي (السبب: ' + why + '). جرب فكرة تانية أو جرب تاني.');
-    }
-    let arr;
-    try {
-        arr = JSON.parse(txt.replace(/^```json|```$/g, '').trim());
-    }
-    catch {
-        throw new Error('الرد مش JSON سليم (' + (data?.candidates?.[0]?.finishReason || '?') + '). جرب تاني.');
-    }
-    let hookObj = null;
-    if (!Array.isArray(arr) && arr && Array.isArray(arr.scenes)) {
-        hookObj = arr;
-        arr = arr.scenes;
-    }
-    if (!Array.isArray(arr) || arr.length < 3)
-        throw new Error('السكريبت طلع ناقص، جرب تاني');
-    const mid = arr.slice(0, 14).map((s) => {
-        const caption = String(s.caption ?? '');
-        const red = String(s.red ?? '');
-        const labels = (Array.isArray(s.labels) ? s.labels : []).slice(0, 3).map((l) => ({ t: String(l?.t ?? '').slice(0, 22), x: Math.max(40, Math.min(600, Number(l?.x) || 320)), y: Math.max(40, Math.min(600, Number(l?.y) || 320)) })).filter((l) => l.t);
-        const stamp = String(s.stamp ?? '').slice(0, 16);
-        const sv = Number(s.stat?.v); const stat = s.stat && isFinite(sv) && String(s.stat.t || '') ? { t: String(s.stat.t).slice(0, 20), v: sv, u: String(s.stat.u ?? '').slice(0, 10) } : null;
-        return { labels, stamp, stat, voice: String(s.voice ?? ''), caption, red: caption.includes(red) ? red : '', n: Math.max(0, Math.min(9, Number(s.n) || 0)), of: Math.max(0, Math.min(9, Number(s.of) || 0)), draw: cleanSvg(String(s.draw ?? '')) };
-    });
-    // Fix missing or too-simple drawings: one regeneration attempt, then a rich built-in drawing.
-    for (let i = 0; i < mid.length; i++) {
-        if (drawStats(mid[i].draw).n >= 3)
-            continue;
-        try {
-            onStatus(`رسمة مشهد ${i + 1} طلعت ناقصة، بعملها تاني…`);
-            const d = await genDraw(key, mid[i]);
-            if (drawStats(d).n >= 3) {
-                mid[i].draw = d;
-                continue;
-            }
+    const prompt = `أنت كاتب سكريبتات ومصمم لقناة "سر في دقيقة" (علم وتاريخ، من غير ظهور). اعمل فيديو رأسي 50 لـ 65 ثانية بالمصري عن: ${idea}
+الستايل "من جوا": رسمة واحدة كبيرة للموضوع كله مقطوعة من جوا، والكاميرا بتقرب على جزء جديد منها في كل مشهد.
+ردك لازم يكون على شكل خطوتين بالترتيب ده:
+الخطوة 1: اكتب السطر ===SVG=== وبعده رسمة SVG واحدة بس: viewBox="0 0 1000 1000"، بتملا المساحة كلها، مقطع من جوا للموضوع كله (مش رسمة لكل جزء)، من 20 لـ 40 عنصر مقسمين لمجموعات <g id="..."> كل مجموعة جزء مميز مرتبط بالموضوع نفسه، بتفاصيل دقيقة زي الرسم التشريحي العلمي (طبقات، ظلال بخطوط رفيعة، نقط، أسهم). ألوان هادية مطفية بس: #ebe3cf #f2c9b5 #e8a58c #c97d62 #8a9a5b #b5724f #d9cdb0 #c4532f #4a7fa8 #2b2b2b، وخط خارجي رفيع غامق stroke="#2b2b2b" stroke-width="3". من غير أي نص أو حروف ومن غير مستطيل خلفية كامل.
+الخطوة 2: بعد الرسمة اكتب السطر ===JSON=== وبعده JSON بس (من غير شرح): كائن {hook, hookRed, topic, scenes}.
+القالب: سؤال مثير، سلسلة أسئلة "طب إزاي؟ / طب ليه؟" كل جواب بيفتح سؤال، تشبيه بسيط، مقارنة، نقط مرقمة 3 لـ 4، ملخص في جملة. بعد أول مشهد قول جملة تشويق بتفتح حلقة مفتوحة، والمشهد قبل الأخير لازم يكون المفاجأة أو الإجابة اللي وعدت بيها. كل مشهد لازم يجيب معلومة جديدة من غير حشو.
+scenes: 10 لـ 13 مشهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 12 كلمة، بتتقرا في 4 لـ 5 ثواني)، caption جملة قصيرة جدا (حد أقصى 6 كلمات)، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، n رقم النقطة (1 لـ 4) لو المشهد نقطة من نقط مرقمة وإلا 0، of عدد النقط الكلي أو 0، focus: {x, y, z} النقطة في الرسمة (x و y من 0 لـ 1000) اللي الكاميرا تقرب عليها وقت المشهد، و z التقريب من 1 (الرسمة كلها) لـ 3 (تفصيلة صغيرة)، والمشاهد المتتالية تتنقل بين أجزاء مختلفة، وتأكد إن النقطة فعلا فيها الجزء اللي المشهد بيتكلم عنه في الرسمة اللي رسمتها. labels مصفوفة من 0 لـ 3 تسميات قصيرة جدا (كلمة أو كلمتين) بتشاور على أجزاء في منطقة التقريب: كل واحدة {t, x, y} بنفس إحداثيات الرسمة (0 لـ 1000). stamp شارة حمرا قصيرة جدا (رقم أو نسبة أو كلمة، مثلا "80%" أو "الفرق؟") في المشاهد المهمة بس وإلا فاضي. stat لو فيه رقم حقيقي: {t: اسم القيمة بكلمتين, v: الرقم, u: الوحدة} وإلا فاضي.
+hook: رقم ضخم مع حالة متطرفة، أو حقيقة صادمة، أو "كلهم غلطانين في..."، حد أقصى 8 كلمات، تتقال وتتكتب في أول 3 ثواني، من غير مقدمات. hookRed كلمة واحدة من الـ hook. topic اسم الموضوع في كلمتين أو تلاتة.`;
+    let master = '', arr = null, hookObj = null;
+    for (let attempt = 0; attempt < 2 && !(master && arr); attempt++) {
+        if (attempt) onStatus('الرسمة الكبيرة طلعت ناقصة، بجرب تاني…');
+        const data = await stepPost('خطوة كتابة السكريبت والرسمة', TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 32768 } }, 'text');
+        const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+        if (!txt.trim()) {
+            const why = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || 'غير معروف';
+            throw new Error('جوجل رجعت رد فاضي (السبب: ' + why + '). جرب فكرة تانية أو جرب تاني.');
         }
-        catch (e) { /* fall through to the built-in drawing */ }
-        mid[i].draw = fallbackDraw(i + 1);
+        const iJ = txt.indexOf('===JSON==='), iS = txt.indexOf('===SVG===');
+        const svgPart = iS >= 0 ? txt.slice(iS + 9, iJ > iS ? iJ : undefined) : '';
+        const m = cleanMaster(svgPart);
+        let o = null;
+        if (iJ >= 0) { try { o = JSON.parse(txt.slice(iJ + 10).replace(/```json|```/g, '').trim()); } catch { o = null; } }
+        if (o && Array.isArray(o.scenes) && o.scenes.length >= 3) { arr = o.scenes; hookObj = o; }
+        if (shapeCount(m) >= 12) master = m;
+        else if (arr) arr = arr; 
+        if (!master) arr = master ? arr : (attempt ? arr : null);
     }
-    const first = SAMPLE[0];
-    const last = SAMPLE[SAMPLE.length - 1];
-    // 3-second hook: spoken and shown before the fixed opener, with the punchy intro drawing.
+    if (!arr) throw new Error('السكريبت طلع ناقص أو مش JSON سليم. جرب تاني.');
+    const useMaster = !!master;
+    const clampN = (v, lo, hi, d) => { v = Number(v); return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; };
+    const mid = arr.slice(0, 14).map((s, i) => {
+        const caption = String(s.caption ?? ''), red = String(s.red ?? '');
+        const labels = (Array.isArray(s.labels) ? s.labels : []).slice(0, 3).map((l) => ({ t: String(l?.t ?? '').slice(0, 22), x: clampN(l?.x, 0, 1000, 500), y: clampN(l?.y, 0, 1000, 500) })).filter((l) => l.t);
+        const sv = Number(s.stat?.v); const stat = s.stat && isFinite(sv) && String(s.stat.t || '') ? { t: String(s.stat.t).slice(0, 20), v: sv, u: String(s.stat.u ?? '').slice(0, 10) } : null;
+        const f = s.focus || {};
+        const focus = { x: clampN(f.x, 0, 1000, 500), y: clampN(f.y, 0, 1000, 500), z: clampN(f.z, 1, 3.2, 1.8) };
+        const base = { labels, stamp: String(s.stamp ?? '').slice(0, 16), stat, voice: String(s.voice ?? ''), caption, red: caption.includes(red) ? red : '', n: Math.max(0, Math.min(9, Number(s.n) || 0)), of: Math.max(0, Math.min(9, Number(s.of) || 0)) };
+        return useMaster ? { ...base, draw: master, master: true, focus } : { ...base, draw: fallbackDraw(i + 1) };
+    });
+    if (!useMaster) onStatus('الرسمة الكبيرة ما طلعتش، استخدمت رسمات بديلة. جرب تاني لو عايز رسمة أحسن.');
+    const first = SAMPLE[0], last = SAMPLE[SAMPLE.length - 1];
+    const wide = { x: 500, y: 500, z: 1 };
     const out = [];
     const hookText = String(hookObj?.hook ?? '').trim();
     if (hookText && hookText.split(/\s+/).filter(Boolean).length <= 10) {
-        let hr = String(hookObj?.hookRed ?? '').trim();
-        if (!hookText.includes(hr))
-            hr = '';
-        out.push({ voice: hookText, caption: hookText, red: hr, n: 0, of: 0, draw: HOOK_DRAW, hook: true });
+        let hr = String(hookObj?.hookRed ?? '').trim(); if (!hookText.includes(hr)) hr = '';
+        out.push({ voice: hookText, caption: hookText, red: hr, n: 0, of: 0, draw: useMaster ? master : HOOK_DRAW, master: useMaster, focus: wide, hook: true });
     }
     const topic = String(hookObj?.topic ?? '').slice(0, 24);
-    return [...out, { ...first, teaser: 'ابقى للآخر: فيه مفاجأة' }, ...mid, { ...last, closer: true }].map((x) => ({ ...x, topic }));
+    const all = [...out, { ...first, teaser: 'ابقى للآخر: فيه مفاجأة', ...(useMaster ? { draw: master, master: true, focus: wide } : {}) }, ...mid, { ...last, closer: true, ...(useMaster ? { draw: master, master: true, focus: wide, labels: [] } : {}) }].map((x) => ({ ...x, topic }));
+    all.forEach((x, i) => { x.pf = i ? all[i - 1].focus : null; });
+    return all;
 }
 async function genVoice(key, text, voice) {
     const data = await stepPost('خطوة الصوت', TTS_MODELS, key, {
@@ -452,7 +475,7 @@ function loadSvg(svg) {
     if (!svg)
         return Promise.resolve(null);
     if (!imgCache.has(svg))
-        imgCache.set(svg, rasterSvg(svg).then(async (im) => { if (im) im.layers = await splitLayers(svg); return im; }));
+        imgCache.set(svg, rasterSvg(svg).then(async (im) => { if (im && !/data-master=/.test(svg.slice(0, 200))) im.layers = await splitLayers(svg); return im; }));
     return imgCache.get(svg);
 }
 function wrap(ctx, words, maxW) {
@@ -552,6 +575,13 @@ function sentence(ctx, scene, t, cx, y0, size, lineH, maxW, weight) {
     });
     ctx.globalAlpha = 1;
 }
+function camView(scene, t, dur) {
+    const A = 664, B = 852, ease = (k) => { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); };
+    const f = scene.focus, p0 = scene.pf || f, k = ease(t / 0.9), p = Math.min(1, t / dur);
+    const cx = p0.x + (f.x - p0.x) * k, cy = p0.y + (f.y - p0.y) * k, z = (p0.z + (f.z - p0.z) * k) * (1 + 0.07 * p);
+    const vh = Math.min(1000, 1000 / z), vw = Math.min(1000, vh * A / B), vh2 = vw * B / A;
+    return { vw, vh: vh2, sx: Math.max(0, Math.min(1000 - vw, cx - vw / 2)), sy: Math.max(0, Math.min(1000 - vh2, cy - vh2 / 2)) };
+}
 function drawFrame(ctx, scene, img, idx, total, t) {
     ctx.drawImage(paperBg(), 0, 0);
     const dur = scene.dur ?? 4, fade = Math.min(1, t / 0.3);
@@ -565,6 +595,10 @@ function drawFrame(ctx, scene, img, idx, total, t) {
             // title card: small drawing under the big title
             ctx.globalAlpha = fade; ctx.translate(W / 2, 640 + (1 - e) * 30); const z = (0.7 + 0.3 * e) * (1 + 0.04 * Math.min(1, t / dur) + punch); ctx.scale(z, z);
             ctx.drawImage(img, -230, -230, 460, 460);
+        } else if (scene.master && scene.focus) {
+            ctx.beginPath(); ctx.rect(28, 28, W - 56, bottom - 28); ctx.clip(); ctx.globalAlpha = fade;
+            const v = camView(scene, t, dur); const K = img.width / 1000;
+            ctx.drawImage(img, v.sx * K, v.sy * K, v.vw * K, v.vh * K, 28, 28, W - 56, bottom - 28);
         } else {
             ctx.beginPath(); ctx.rect(28, 28, W - 56, bottom - 28); ctx.clip();
             // continuous slow zoom and pan across the drawing
@@ -586,7 +620,8 @@ function drawFrame(ctx, scene, img, idx, total, t) {
             const sz = 760 * (1 + 0.06);
             scene.labels.forEach((l, n) => {
                 const lk = Math.max(0, Math.min(1, (t - 0.9 - n * 0.5) / 0.3)); if (lk <= 0) return;
-                const tx = W / 2 + (l.x / 640 - 0.5) * sz, ty = 455 + (l.y / 640 - 0.5) * sz;
+                let tx = W / 2 + (l.x / 640 - 0.5) * sz, ty = 455 + (l.y / 640 - 0.5) * sz;
+                if (scene.master) { const v = camView(scene, t, dur); tx = 28 + (l.x - v.sx) / v.vw * (W - 56); ty = 28 + (l.y - v.sy) / v.vh * (bottom - 28); if (tx < 50 || tx > W - 50 || ty < 130 || ty > bottom - 20) return; }
                 const left = tx < W / 2, px = left ? 135 : W - 135, py = Math.max(150, Math.min(800, ty + (n % 2 ? -70 : 70)));
                 ctx.save(); ctx.globalAlpha = lk; ctx.strokeStyle = C.ink; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
                 ctx.beginPath(); ctx.moveTo(px, py + 20); ctx.lineTo(px + (tx - px) * lk, py + 20 + (ty - py - 20) * lk); ctx.stroke();
@@ -680,7 +715,7 @@ async function renderRecorder(canvas, scenes, onProgress) {
     const cands = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
     const mime = cands.find((m) => window.MediaRecorder?.isTypeSupported?.(m)) ?? '';
     const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
-    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 3500000 } : undefined);
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 6000000 } : undefined);
     const chunks = [];
     rec.ondataavailable = (e) => { if (e.data.size)
         chunks.push(e.data); };
@@ -747,7 +782,7 @@ async function renderMp4(canvas, scenes, onProgress) {
     const total = acc + 0.3;
     let vcfg = null;
     for (const codec of ['avc1.640028', 'avc1.4d0028', 'avc1.42002a', 'avc1.42001f']) {
-        const c = { codec, width: W0, height: H0, bitrate: 3500000, framerate: FPS };
+        const c = { codec, width: W0, height: H0, bitrate: 6000000, framerate: FPS };
         try { const r = await VideoEncoder.isConfigSupported(c); if (r.supported) { vcfg = r.config || c; vcfg.codec = codec; break; } } catch (e) {}
     }
     if (!vcfg) throw new Error('H.264 مش متاح');
@@ -847,7 +882,7 @@ function show() {
 }
 function listen(i) { const p = scenes[i].pcm; if (!p) return err('مفيش صوت للمشهد ده لسه'); const ac = new (window.AudioContext || window.webkitAudioContext)(); const b = ac.createBuffer(1, p.length, SR); b.copyToChannel(p, 0); const s = ac.createBufferSource(); s.buffer = b; s.connect(ac.destination); s.start(); }
 $('demo').onclick = () => { err(''); const hk = 'السما زرقا بسبب خدعة في عينيك!';
-  scenes = [{ voice: hk, caption: hk, red: 'خدعة', n: 0, of: 0, draw: HOOK_DRAW, hook: true, pcm: silentPcm(hk) }, ...SAMPLE.map(x => ({...x, pcm: silentPcm(x.voice)}))]; show(); msg('تجربة بصوت صامت علشان تشوف الشكل.'); preview(0); };
+  scenes = [{ voice: hk, caption: hk, red: 'خدعة', n: 0, of: 0, draw: MASTER_DEMO, master: true, focus: MASTER_FOCUS(0), hook: true, pcm: silentPcm(hk), topic: 'ليه السما زرقا' }, ...SAMPLE.map((x, k) => ({...x, draw: MASTER_DEMO, master: true, focus: MASTER_FOCUS(k), topic: 'ليه السما زرقا', labels: k == 2 ? [{ t: 'ضوء أزرق', x: 640, y: 360 }, { t: 'جزيئات الهوا', x: 560, y: 400 }] : [], pcm: silentPcm(x.voice)}))]; scenes.forEach((x, i) => { x.pf = i ? scenes[i - 1].focus : null; }); show(); msg('تجربة بصوت صامت علشان تشوف الشكل.'); preview(0); };
 $('go').onclick = async () => { err(''); if (!key()) return err('الصق مفتاح جوجل الأول'); if (!$('idea').value.trim()) return err('اكتب الفكرة'); try { msg('بكتب السكريبت…'); scenes = await genScript(key(), $('idea').value.trim()); show(); msg('السكريبت جاهز. راجعه وعدّل.'); preview(0); } catch (e) { err(e); } };
 $('allv').onclick = async () => { err(''); try { for (let i = 0; i < scenes.length; i++) { msg(`بعمل الصوت ${i+1} من ${scenes.length}…`); await makeVoice(scenes[i]); } show(); msg('الصوت جاهز لكل المشاهد.'); } catch (e) { err(e); } };
 $('mk').onclick = async () => {
