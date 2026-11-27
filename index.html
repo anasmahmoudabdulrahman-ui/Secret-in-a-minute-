@@ -381,56 +381,156 @@ function cleanMaster(raw) {
 }
 const MASTER_DEMO = cleanMaster(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000"><g id="sky"><rect x="0" y="0" width="1000" height="560" fill="#9fc3c9" stroke="#2b2b2b" stroke-width="3"/><rect x="0" y="360" width="1000" height="200" fill="#b8d3d3"/></g><g id="sun"><circle cx="160" cy="150" r="90" fill="#e8a58c" stroke="#2b2b2b" stroke-width="3"/><circle cx="160" cy="150" r="55" fill="#f2c9b5"/></g><g id="rays"><path d="M250 180 L560 400 M250 150 L600 300 M240 210 L520 480" stroke="#c97d62" stroke-width="5" fill="none" stroke-dasharray="14 10"/></g><g id="air"><circle cx="560" cy="400" r="34" fill="#8a9a5b" stroke="#2b2b2b" stroke-width="3"/><circle cx="640" cy="300" r="26" fill="#8a9a5b" stroke="#2b2b2b" stroke-width="3"/><circle cx="520" cy="480" r="30" fill="#8a9a5b" stroke="#2b2b2b" stroke-width="3"/><circle cx="760" cy="420" r="24" fill="#8a9a5b" stroke="#2b2b2b" stroke-width="3"/></g><g id="blue"><path d="M560 400 L720 600 M640 300 L820 560 M520 480 L640 640" stroke="#4a7fa8" stroke-width="6" fill="none"/></g><g id="ground"><path d="M0 560 H1000 V1000 H0Z" fill="#b5724f" stroke="#2b2b2b" stroke-width="3"/><path d="M0 620 H1000" stroke="#8d5638" stroke-width="4"/></g><g id="eye"><ellipse cx="760" cy="700" rx="150" ry="85" fill="#f7f1e1" stroke="#2b2b2b" stroke-width="4"/><circle cx="760" cy="700" r="55" fill="#4a7fa8" stroke="#2b2b2b" stroke-width="3"/><circle cx="760" cy="700" r="24" fill="#2b2b2b"/><circle cx="742" cy="682" r="9" fill="#fff"/></g><g id="eyedetail"><path d="M640 700 q120 -120 240 0" fill="none" stroke="#2b2b2b" stroke-width="3"/><path d="M640 700 q120 120 240 0" fill="none" stroke="#2b2b2b" stroke-width="3"/><path d="M180 820 H420 M180 860 H380" stroke="#8d5638" stroke-width="5"/></g></svg>`);
 const MASTER_FOCUS = (k) => [{ x: 500, y: 500, z: 1 }, { x: 160, y: 150, z: 2.2 }, { x: 600, y: 400, z: 2.2 }, { x: 760, y: 700, z: 2.4 }][k % 4];
+const SCRIPT_SYSTEM = `# Script system prompt: "Secret in a Minute" scriptwriter v1.0
+
+## Purpose
+You write one vertical short-video script (50 to 65 seconds when read aloud) for a faceless Arabic science and history channel. The format is a "from the inside" explainer: one illustrated subject, and the camera moves to a new part of it in every scene. A successful script makes a viewer stay to the end, learn something true, and want to save or send the video.
+Your output is read by an app. It voices each scene with text-to-speech and passes your visual plan to a separate illustrator step. You do not draw anything.
+
+## Inputs
+The user message gives IDEA (the topic, in Arabic or English). Nothing else is required.
+
+## Language
+Write voice, caption, hook, labels and stamp in simple Egyptian Arabic (colloquial, short sentences, easy to speak). JSON keys and the subject and parts fields are in English.
+
+## Facts
+- Use only well-established facts. Do not invent numbers, dates, names or sources. Round numbers when exact values vary.
+- State findings at their real level of certainty. A claim from one study is "دراسة لقت" or "اتقال إن", not a settled fact. Do not turn "traces" or "possible" into "proved" or "intact".
+- If the idea asks for harmful step-by-step instructions (weapons, drugs, hacking), explain only how the thing works in general terms, with no actionable detail.
+- If the idea is ambiguous, choose its most common meaning. If the idea is empty, return {"error":"empty_idea"}.
+
+## Structure
+1. hook: at most 8 words, spoken and shown in the first 3 seconds. Use one of: a huge number plus an extreme condition, a shocking true fact, "كلهم غلطانين في...", or a question about something the viewer sees every day. No greetings, no "في الفيديو ده".
+2. 10 to 13 scenes. The app adds its own fixed opening and closing lines, so do not write them.
+3. Scene 1 states the question. Scene 2 opens a loop ("وفي الآخر هقولك حاجة محدش بيقولها") that the second-to-last scene pays off.
+4. Middle scenes chain "طب إزاي؟ / طب ليه؟": each answer opens the next question. Include one simple analogy, one comparison, and 3 or 4 numbered points.
+5. The last scene is a one-sentence summary.
+6. Every scene adds a new fact or flips an expectation. No filler, no repetition.
+
+## Scene fields
+- voice: 1 or 2 short sentences, at most 12 words, readable in 4 to 5 seconds.
+- caption: at most 6 words.
+- red: exactly one word that appears literally inside caption.
+- n and of: the point number (1 to 4) and total points when the scene is a numbered point, otherwise 0 and 0.
+- stamp: a very short red tag shown above the drawing (a number, a percentage or one word, like "80%" or "الفرق؟"), only on important scenes, otherwise "".
+- stat: only when the scene has a real number: {"t": name of the value in 1 to 2 words, "v": number, "u": unit}. Otherwise null.
+- part: which part of the illustration this scene is about. It must be exactly one of the names in parts. Consecutive scenes must use different parts.
+- labels: 0 to 3 very short Arabic names (1 to 2 words) of things that are visible inside that part.
+
+## Visual plan
+- subject: one English sentence describing the single cutaway illustration of the whole subject that the illustrator must draw. It must be a real, recognizable thing (an anatomy, a machine, a landscape cross-section). If the topic is an abstract idea, choose a concrete physical scene that shows its mechanism.
+- parts: 6 to 12 distinct physical parts of that illustration, as short English names. Every part must be something that can be drawn and zoomed on.
+- topic: the topic name in 2 or 3 Arabic words.
+
+## Output contract
+Return JSON only, no code fences and no commentary, with this shape:
+{"hook":"","hookRed":"","topic":"","subject":"","parts":[""],"scenes":[{"voice":"","caption":"","red":"","n":0,"of":0,"stamp":"","stat":null,"part":"","labels":[""]}]}
+hookRed is one word taken from hook.
+
+## Example (shape only, two scenes shown; a real answer has 10 to 13)
+{"hook":"السما زرقا بسبب خدعة في عينيك","hookRed":"خدعة","topic":"ليه السما زرقا","subject":"Cross-section of sunlight entering the atmosphere and reaching a human eye","parts":["sun","sunlight rays","air molecules","blue scattered light","horizon","human eye"],"scenes":[{"voice":"ضوء الشمس شكله أبيض، بس جواه كل الألوان.","caption":"الشمس فيها كل الألوان","red":"كل","n":0,"of":0,"stamp":"","stat":null,"part":"sun","labels":["الشمس"]},{"voice":"الهوا بيفرق الأزرق أكتر من أي لون تاني.","caption":"الهوا بيفرق الأزرق","red":"الأزرق","n":1,"of":3,"stamp":"1","stat":{"t":"طول موجة الأزرق","v":450,"u":"نانومتر"},"part":"air molecules","labels":["جزيئات الهوا","ضوء أزرق"]}]}`;
+const DRAW_SYSTEM = `# Drawing system prompt: "Secret in a Minute" illustrator and camera planner v1.0
+
+## Purpose
+You draw ONE master illustration of a whole subject as SVG, then place the camera for each scene of a video. The video zooms into a different part of this single drawing in every scene, so the drawing must be coherent, detailed and recognizable, like a scientific cutaway or an engineer's cross-section. A successful result looks like the real subject, with every named part easy to find and worth zooming on.
+Your output is parsed by an app that rasterizes the SVG and animates a camera over it. You do not write the script.
+
+## Inputs
+The user message is JSON: {"topic":"","subject":"","parts":[""],"scenes":[{"i":0,"part":"","labels":[""]}]}.
+subject is the illustration to draw. parts are the named parts it must contain. Each scene names the part it focuses on and the Arabic label names to place.
+
+## Drawing rules
+- One root svg element with viewBox="0 0 1000 1000". No width or height attributes. No text, no letters, no image, no foreignObject, no script, no filters, no external references.
+- Draw the real subject: its true shapes and proportions, as a cutaway (opened up to show the inside). Never use placeholder shapes such as a plain circle, rectangle or bottle to stand for a thing. If the topic is abstract, draw the concrete physical scene named in subject.
+- Make one group per part: <g id="part-slug" data-part="exact part name">. Draw 25 to 45 shapes in total, and give every part a fill plus at least two detail strokes (texture lines, layers, dots, veins, hatching). Never leave an outline-only or empty shape.
+- Lay the parts out across the whole canvas so they do not overlap into a mess: each part has its own area, parts that connect are drawn connected, and the biggest structure sits in the middle. Keep 40 units of margin. Do not draw a full-canvas background rectangle (the app draws the paper).
+- Style target (matches the channel's two reference videos): colored flat vector cutaway, clean dark outlines (stroke="#2b2b2b", stroke-width 3 to 4, stroke-linejoin="round", stroke-linecap="round"), muted fills, and anatomical-style detail. Every main shape gets: a base fill, a darker or lighter inner shape for volume (an inset shape about 80 percent of the size), a highlight stripe, and 2 to 4 thin detail strokes (stroke-width 1.5 to 2). Cutaway cross-sections show layers (outer wall, inner lining, contents). Machines show housing, internal parts, small dots for bolts or rivets, and hatching for cut surfaces.
+- Palette only: #ebe3cf #f2c9b5 #e8a58c #c97d62 #b5724f #8a9a5b #d9cdb0 #e0a03c #3f6fa0 #4a7fa8 #2b2b2b #c4532f. Use #c4532f only for the one thing that matters most.
+- Draw order: background structures first, details last.
+
+## Style snippets (patterns to adapt, not to copy)
+- Organ or soft body: <path d="M300 300 C260 420 330 520 440 500 C560 480 560 340 460 290 C400 260 330 250 300 300Z" fill="#e8a58c" stroke="#2b2b2b" stroke-width="4"/> then an inner shape <path d="M335 320 C310 410 360 480 440 470 C520 455 520 355 450 320 C400 298 350 290 335 320Z" fill="#f2c9b5"/> then a highlight <path d="M350 330 C340 380 360 420 390 440" stroke="#ebe3cf" stroke-width="6" fill="none"/> and a few dots <circle cx="430" cy="390" r="5" fill="#c97d62"/>.
+- Tube or vessel (a long curved part): draw a thick path stroke="#2b2b2b" stroke-width="34" stroke-linecap="round", draw the same path again with stroke="#e8a58c" stroke-width="26", then a thin light path stroke="#f2c9b5" stroke-width="6" on top, and small circles along it.
+- Mechanical part: <rect x="560" y="300" width="260" height="140" rx="16" fill="#d9cdb0" stroke="#2b2b2b" stroke-width="4"/> with an inner <rect x="580" y="320" width="220" height="100" rx="10" fill="#3f6fa0"/>, hatching lines <path d="M590 330 l30 -10 M620 340 l30 -10" stroke="#2b2b2b" stroke-width="2"/>, and rivets <circle cx="575" cy="315" r="5" fill="#2b2b2b"/>.
+- Cut layers (ground, bone, wall): stacked bands of fill #b5724f, #c97d62 and #d9cdb0, each with a thin dark outline and small speckle dots.
+
+## Camera rules
+For every scene in the input, return its focus and labels using the coordinates of the SVG you drew:
+- focus.x and focus.y: the center of that scene's part in your drawing (0 to 1000).
+- focus.z: zoom from 1 (whole drawing) to 3 (small detail). Use about 1.4 for a large part, 2 for a medium part, 2.5 to 3 for a small detail.
+- The visible window at zoom z is about (1000 / z) tall and 0.78 of that wide, centered on focus. Every label point must lie inside this window, at least 8 percent away from its edges, and on the thing it names.
+- labels: use exactly the label texts from the input, in the same order, each with its x and y on that thing. Do not invent or translate labels.
+- Different scenes that share a part may use slightly different focus points so the camera keeps moving.
+
+## Output contract
+Reply with exactly this, nothing before or after:
+===SVG===
+(the svg)
+===JSON===
+{"scenes":[{"i":0,"focus":{"x":500,"y":500,"z":1.4},"labels":[{"t":"label text","x":480,"y":520}]}]}
+Return one entry for every scene i in the input, in order.
+
+## Exceptions
+- If a part name is unclear, draw its most common meaning. If two parts cannot both be drawn, merge the smaller one into its neighbor group and keep its data-part name on that group.
+- If the topic is unclear, draw the most common interpretation of subject. Never return an empty drawing or a generic placeholder.
+
+## Example (tiny, one part, one scene; a real answer is far more detailed)
+===SVG===
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000"><g id="sun" data-part="sun"><circle cx="200" cy="180" r="110" fill="#e8a58c" stroke="#2b2b2b" stroke-width="3"/><circle cx="200" cy="180" r="62" fill="#f2c9b5" stroke="#2b2b2b" stroke-width="3"/><path d="M200 40 V10 M320 180 H360 M80 180 H40" stroke="#c97d62" stroke-width="3"/></g></svg>
+===JSON===
+{"scenes":[{"i":0,"focus":{"x":200,"y":180,"z":2.2},"labels":[{"t":"الشمس","x":200,"y":180}]}]}`;
+function parseLoose(txt) { const t = String(txt || '').replace(/```json|```/g, ''); const a = t.indexOf('{'), b = t.lastIndexOf('}'); if (a < 0 || b <= a) return null; try { return JSON.parse(t.slice(a, b + 1)); } catch (e) { return null; } }
+function txtOf(data) { return data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''; }
+function whyEmpty(data) { return data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || 'غير معروف'; }
 async function genScript(key, idea) {
-    const prompt = `أنت كاتب سكريبتات ومصمم لقناة "سر في دقيقة" (علم وتاريخ، من غير ظهور). اعمل فيديو رأسي 50 لـ 65 ثانية بالمصري عن: ${idea}
-الستايل "من جوا": رسمة واحدة كبيرة للموضوع كله مقطوعة من جوا، والكاميرا بتقرب على جزء جديد منها في كل مشهد.
-ردك لازم يكون على شكل خطوتين بالترتيب ده:
-الخطوة 1: اكتب السطر ===SVG=== وبعده رسمة SVG واحدة بس: viewBox="0 0 1000 1000"، بتملا المساحة كلها، مقطع من جوا للموضوع كله (مش رسمة لكل جزء)، من 20 لـ 40 عنصر مقسمين لمجموعات <g id="..."> كل مجموعة جزء مميز مرتبط بالموضوع نفسه، بتفاصيل دقيقة زي الرسم التشريحي العلمي (طبقات، ظلال بخطوط رفيعة، نقط، أسهم). ألوان هادية مطفية بس: #ebe3cf #f2c9b5 #e8a58c #c97d62 #8a9a5b #b5724f #d9cdb0 #c4532f #4a7fa8 #2b2b2b، وخط خارجي رفيع غامق stroke="#2b2b2b" stroke-width="3". من غير أي نص أو حروف ومن غير مستطيل خلفية كامل.
-الخطوة 2: بعد الرسمة اكتب السطر ===JSON=== وبعده JSON بس (من غير شرح): كائن {hook, hookRed, topic, scenes}.
-القالب: سؤال مثير، سلسلة أسئلة "طب إزاي؟ / طب ليه؟" كل جواب بيفتح سؤال، تشبيه بسيط، مقارنة، نقط مرقمة 3 لـ 4، ملخص في جملة. بعد أول مشهد قول جملة تشويق بتفتح حلقة مفتوحة، والمشهد قبل الأخير لازم يكون المفاجأة أو الإجابة اللي وعدت بيها. كل مشهد لازم يجيب معلومة جديدة من غير حشو.
-scenes: 10 لـ 13 مشهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 12 كلمة، بتتقرا في 4 لـ 5 ثواني)، caption جملة قصيرة جدا (حد أقصى 6 كلمات)، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، n رقم النقطة (1 لـ 4) لو المشهد نقطة من نقط مرقمة وإلا 0، of عدد النقط الكلي أو 0، focus: {x, y, z} النقطة في الرسمة (x و y من 0 لـ 1000) اللي الكاميرا تقرب عليها وقت المشهد، و z التقريب من 1 (الرسمة كلها) لـ 3 (تفصيلة صغيرة)، والمشاهد المتتالية تتنقل بين أجزاء مختلفة، وتأكد إن النقطة فعلا فيها الجزء اللي المشهد بيتكلم عنه في الرسمة اللي رسمتها. labels مصفوفة من 0 لـ 3 تسميات قصيرة جدا (كلمة أو كلمتين) بتشاور على أجزاء في منطقة التقريب: كل واحدة {t, x, y} بنفس إحداثيات الرسمة (0 لـ 1000). stamp شارة حمرا قصيرة جدا (رقم أو نسبة أو كلمة، مثلا "80%" أو "الفرق؟") في المشاهد المهمة بس وإلا فاضي. stat لو فيه رقم حقيقي: {t: اسم القيمة بكلمتين, v: الرقم, u: الوحدة} وإلا فاضي.
-hook: رقم ضخم مع حالة متطرفة، أو حقيقة صادمة، أو "كلهم غلطانين في..."، حد أقصى 8 كلمات، تتقال وتتكتب في أول 3 ثواني، من غير مقدمات. hookRed كلمة واحدة من الـ hook. topic اسم الموضوع في كلمتين أو تلاتة.`;
-    let master = '', arr = null, hookObj = null;
-    for (let attempt = 0; attempt < 2 && !(master && arr); attempt++) {
-        if (attempt) onStatus('الرسمة الكبيرة طلعت ناقصة، بجرب تاني…');
-        const data = await stepPost('خطوة كتابة السكريبت والرسمة', TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 32768 } }, 'text');
-        const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-        if (!txt.trim()) {
-            const why = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || 'غير معروف';
-            throw new Error('جوجل رجعت رد فاضي (السبب: ' + why + '). جرب فكرة تانية أو جرب تاني.');
-        }
-        const iJ = txt.indexOf('===JSON==='), iS = txt.indexOf('===SVG===');
-        const svgPart = iS >= 0 ? txt.slice(iS + 9, iJ > iS ? iJ : undefined) : '';
-        const m = cleanMaster(svgPart);
-        let o = null;
-        if (iJ >= 0) { try { o = JSON.parse(txt.slice(iJ + 10).replace(/```json|```/g, '').trim()); } catch { o = null; } }
-        if (o && Array.isArray(o.scenes) && o.scenes.length >= 3) { arr = o.scenes; hookObj = o; }
-        if (shapeCount(m) >= 12) master = m;
-        else if (arr) arr = arr; 
-        if (!master) arr = master ? arr : (attempt ? arr : null);
+    // Step 1: script and visual plan (system prompt for the script).
+    let plan = null;
+    for (let attempt = 0; attempt < 2 && !plan; attempt++) {
+        onStatus(attempt ? 'السكريبت طلع ناقص، بجرب تاني…' : 'بكتب السكريبت…');
+        const data = await stepPost('خطوة كتابة السكريبت', TEXT_MODELS, key, { systemInstruction: { parts: [{ text: SCRIPT_SYSTEM }] }, contents: [{ role: 'user', parts: [{ text: 'IDEA: ' + idea }] }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 16384 } }, 'text');
+        const txt = txtOf(data);
+        if (!txt.trim()) throw new Error('جوجل رجعت رد فاضي (السبب: ' + whyEmpty(data) + '). جرب فكرة تانية أو جرب تاني.');
+        const o = parseLoose(txt);
+        if (o && o.error) throw new Error('الفكرة فاضية أو مش واضحة. اكتب الفكرة تاني.');
+        if (o && Array.isArray(o.scenes) && o.scenes.length >= 3) plan = o;
     }
-    if (!arr) throw new Error('السكريبت طلع ناقص أو مش JSON سليم. جرب تاني.');
+    if (!plan) throw new Error('السكريبت طلع ناقص أو مش JSON سليم. جرب تاني.');
+    const sIn = plan.scenes.slice(0, 14);
+    const parts = (Array.isArray(plan.parts) ? plan.parts : []).map(String).slice(0, 14);
+    const labelNames = (s) => (Array.isArray(s.labels) ? s.labels : []).map((l) => String(typeof l === 'string' ? l : l?.t ?? '').slice(0, 22)).filter(Boolean).slice(0, 3);
+    // Step 2: one master drawing and the camera plan (system prompt for the drawing).
+    const drawIn = JSON.stringify({ topic: String(plan.topic ?? ''), subject: String(plan.subject ?? idea), parts, scenes: sIn.map((s, i) => ({ i, part: String(s.part ?? ''), labels: labelNames(s) })) });
+    let master = '', cams = [];
+    for (let attempt = 0; attempt < 2 && !master; attempt++) {
+        onStatus(attempt ? 'الرسمة الكبيرة طلعت ناقصة، بجرب تاني…' : 'برسم الرسمة الكبيرة للموضوع…');
+        const data = await stepPost('خطوة الرسم', TEXT_MODELS, key, { systemInstruction: { parts: [{ text: DRAW_SYSTEM }] }, contents: [{ role: 'user', parts: [{ text: drawIn }] }], generationConfig: { maxOutputTokens: 32768 } }, 'text');
+        const txt = txtOf(data);
+        const iJ = txt.indexOf('===JSON==='), iS = txt.indexOf('===SVG===');
+        const m = cleanMaster(iS >= 0 ? txt.slice(iS + 9, iJ > iS ? iJ : undefined) : txt);
+        if (shapeCount(m) >= 12) { master = m; const o = iJ >= 0 ? parseLoose(txt.slice(iJ + 10)) : null; cams = Array.isArray(o?.scenes) ? o.scenes : []; }
+    }
     const useMaster = !!master;
     const clampN = (v, lo, hi, d) => { v = Number(v); return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; };
-    const mid = arr.slice(0, 14).map((s, i) => {
+    const mid = sIn.map((s, i) => {
         const caption = String(s.caption ?? ''), red = String(s.red ?? '');
-        const labels = (Array.isArray(s.labels) ? s.labels : []).slice(0, 3).map((l) => ({ t: String(l?.t ?? '').slice(0, 22), x: clampN(l?.x, 0, 1000, 500), y: clampN(l?.y, 0, 1000, 500) })).filter((l) => l.t);
         const sv = Number(s.stat?.v); const stat = s.stat && isFinite(sv) && String(s.stat.t || '') ? { t: String(s.stat.t).slice(0, 20), v: sv, u: String(s.stat.u ?? '').slice(0, 10) } : null;
-        const f = s.focus || {};
+        const cam = cams.find((c) => Number(c?.i) === i) || {};
+        const f = cam.focus || {};
         const focus = { x: clampN(f.x, 0, 1000, 500), y: clampN(f.y, 0, 1000, 500), z: clampN(f.z, 1, 3.2, 1.8) };
-        const base = { labels, stamp: String(s.stamp ?? '').slice(0, 16), stat, voice: String(s.voice ?? ''), caption, red: caption.includes(red) ? red : '', n: Math.max(0, Math.min(9, Number(s.n) || 0)), of: Math.max(0, Math.min(9, Number(s.of) || 0)) };
-        return useMaster ? { ...base, draw: master, master: true, focus } : { ...base, draw: fallbackDraw(i + 1) };
+        const labels = (Array.isArray(cam.labels) ? cam.labels : []).slice(0, 3).map((l) => ({ t: String(l?.t ?? '').slice(0, 22), x: clampN(l?.x, 0, 1000, 500), y: clampN(l?.y, 0, 1000, 500) })).filter((l) => l.t);
+        const base = { stamp: String(s.stamp ?? '').slice(0, 16), stat, voice: String(s.voice ?? ''), caption, red: caption.includes(red) ? red : '', n: Math.max(0, Math.min(9, Number(s.n) || 0)), of: Math.max(0, Math.min(9, Number(s.of) || 0)) };
+        return useMaster ? { ...base, labels, draw: master, master: true, focus } : { ...base, labels: [], draw: fallbackDraw(i + 1) };
     });
     if (!useMaster) onStatus('الرسمة الكبيرة ما طلعتش، استخدمت رسمات بديلة. جرب تاني لو عايز رسمة أحسن.');
     const first = SAMPLE[0], last = SAMPLE[SAMPLE.length - 1];
     const wide = { x: 500, y: 500, z: 1 };
     const out = [];
-    const hookText = String(hookObj?.hook ?? '').trim();
+    const hookText = String(plan.hook ?? '').trim();
     if (hookText && hookText.split(/\s+/).filter(Boolean).length <= 10) {
-        let hr = String(hookObj?.hookRed ?? '').trim(); if (!hookText.includes(hr)) hr = '';
+        let hr = String(plan.hookRed ?? '').trim(); if (!hookText.includes(hr)) hr = '';
         out.push({ voice: hookText, caption: hookText, red: hr, n: 0, of: 0, draw: useMaster ? master : HOOK_DRAW, master: useMaster, focus: wide, hook: true });
     }
-    const topic = String(hookObj?.topic ?? '').slice(0, 24);
+    const topic = String(plan.topic ?? '').slice(0, 24);
     const all = [...out, { ...first, teaser: 'ابقى للآخر: فيه مفاجأة', ...(useMaster ? { draw: master, master: true, focus: wide } : {}) }, ...mid, { ...last, closer: true, ...(useMaster ? { draw: master, master: true, focus: wide, labels: [] } : {}) }].map((x) => ({ ...x, topic }));
     all.forEach((x, i) => { x.pf = i ? all[i - 1].focus : null; });
     return all;
