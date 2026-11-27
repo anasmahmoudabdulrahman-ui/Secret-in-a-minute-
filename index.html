@@ -60,7 +60,7 @@ const TTS_MODEL = 'gemini-3.8-flash-tts';
 const TEXT_MODELS = [TEXT_MODEL];
 const TTS_MODELS = [TTS_MODEL, 'gemini-3.8-flash-lite-tts'];
 const SR = 24000;
-const C = { bg: '#f3ead7', ink: '#2b2b2b', a: '#2f7f86', b: '#e0a84a', c: '#c8553d' };
+const C = { bg: '#ebe3cf', ink: '#2b2b2b', a: '#8a9a5b', b: '#d9a07f', c: '#c4532f' };
 function svgFrame(inner) {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="640" height="640">${inner}</svg>`;
 }
@@ -107,7 +107,7 @@ const HOOK_DRAW = svgFrame(`<circle cx="320" cy="320" r="150" fill="#fff3c4"/><c
 // Regenerates one scene's drawing with a dedicated prompt.
 async function genDraw(key, sc) {
     const prompt = `ارسم رسمة SVG مسطحة (flat) غنية لمشهد في فيديو معلومات قصير. المشهد بيقول: "${sc.voice}" والكابشن بتاعه: "${sc.caption}".
-القواعد: viewBox 0 0 640 640، من 6 لـ 9 عناصر رئيسية في أول مستوى جوه <svg> مباشرة، مترتبة من الخلفية للأمام: خلفية دايرة أو شكل كبير، الجسم الرئيسي للرسمة مرتبط بموضوع المشهد نفسه (مش أشكال عامة ولا دايرة فاضية)، تفاصيل، ورموز صغيرة وأسهم وشرارات. ألوان مسطحة بس: #fff3c4 #e9dcc0 #2f7f86 #8cc3c8 #e0a84a #c8553d #2b2b2b، خطوط سميكة بأطراف مدورة stroke-linecap=round، من غير أي نص أو حروف ومن غير خلفية كاملة، والرسمة تملا المساحة. رجّع كود SVG بس من غير أي شرح.`;
+القواعد: viewBox 0 0 640 640، من 6 لـ 9 عناصر رئيسية في أول مستوى جوه <svg> مباشرة، مترتبة من الخلفية للأمام: خلفية دايرة أو شكل كبير، الجسم الرئيسي للرسمة مرتبط بموضوع المشهد نفسه (مش أشكال عامة ولا دايرة فاضية)، تفاصيل، ورموز صغيرة وأسهم وشرارات. ألوان مسطحة بس: #ebe3cf #f2c9b5 #e8a58c #c97d62 #8a9a5b #b5724f #d9cdb0 #c4532f #2b2b2b، تعبئة ألوان هادية مطفية مع خط خارجي رفيع غامق stroke="#2b2b2b" stroke-width="3" وتفاصيل دقيقة زي رسم تشريحي علمي (خطوط ظل رفيعة، نقط، عروق، طبقات)، من غير أي نص أو حروف ومن غير خلفية كاملة، والرسمة تملا المساحة. رجّع كود SVG بس من غير أي شرح.`;
     const data = await stepPost('خطوة إعادة الرسم', TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 8192 } }, 'text');
     const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
     return cleanSvg(txt);
@@ -115,7 +115,7 @@ async function genDraw(key, sc) {
 const SAMPLE = [
     { voice: OPENER, caption: OPENER, red: 'سر', draw: svgFrame(`<circle cx="320" cy="320" r="170" fill="${C.b}"/><circle cx="320" cy="320" r="110" fill="#fff3c4"/><text x="320" y="360" font-size="120" text-anchor="middle" fill="${C.c}">?</text>`) },
     { voice: 'ليه السما زرقا؟ طب إزاي ضوء الشمس الأبيض بيبقى أزرق؟', caption: 'ليه السما زرقا؟', red: 'زرقا', draw: svgFrame(`<circle cx="130" cy="130" r="70" fill="${C.b}"/><path d="M200 150 L520 300" stroke="${C.b}" stroke-width="14"/><rect x="60" y="440" width="520" height="90" rx="20" fill="${C.a}" opacity=".5"/>`) },
-    { voice: 'ضوء الشمس فيه كل الألوان، والهوا بيفرق الأزرق أكتر من غيره.', caption: 'الهوا بيفرق الأزرق', red: 'الأزرق', draw: svgFrame(`<path d="M80 320 H560" stroke="${C.ink}" stroke-width="10"/><circle cx="300" cy="320" r="26" fill="${C.a}"/><circle cx="380" cy="250" r="18" fill="${C.a}"/><circle cx="420" cy="390" r="18" fill="${C.a}"/><path d="M300 320 L380 250 M300 320 L420 390" stroke="${C.a}" stroke-width="6" stroke-dasharray="14 10"/>`) },
+    { voice: 'ضوء الشمس فيه كل الألوان، والهوا بيفرق الأزرق أكتر من غيره.', caption: 'الهوا بيفرق الأزرق', red: 'الأزرق', labels: [{ t: 'الهوا', x: 300, y: 320 }, { t: 'ضوء أزرق', x: 400, y: 260 }], stamp: 'السبب', draw: svgFrame(`<path d="M80 320 H560" stroke="${C.ink}" stroke-width="10"/><circle cx="300" cy="320" r="26" fill="${C.a}"/><circle cx="380" cy="250" r="18" fill="${C.a}"/><circle cx="420" cy="390" r="18" fill="${C.a}"/><path d="M300 320 L380 250 M300 320 L420 390" stroke="${C.a}" stroke-width="6" stroke-dasharray="14 10"/>`) },
     { voice: CLOSER, caption: CLOSER, red: 'سر', draw: svgFrame(`<rect x="170" y="190" width="300" height="220" rx="40" fill="${C.a}"/><path d="M250 410 L230 480 L320 410Z" fill="${C.a}"/><text x="320" y="340" font-size="120" text-anchor="middle" fill="#fff">؟</text>`) },
 ];
 function silentPcm(text) {
@@ -348,10 +348,13 @@ async function makeVoice(sc) {
 }
 async function genScript(key, idea) {
     const prompt = `أنت كاتب سكريبتات لقناة "سر في دقيقة" (علم وتاريخ، من غير ظهور). اكتب فيديو رأسي 60 لـ 75 ثانية بالمصري عن: ${idea}
-القالب: سؤال مثير، سلسلة أسئلة "طب إزاي؟ / طب ليه؟" كل جواب بيفتح سؤال، تشبيه بسيط، مقارنة، نقط مرقمة 3 لـ 4، ملخص في جملة.
-القواعد: 8 لـ 10 مشاهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 18 كلمة)، caption جملة قصيرة جدا (حد أقصى 6 كلمات) تتكتب تحت الرسمة، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، n رقم النقطة (1 لـ 4) لو المشهد نقطة من نقط مرقمة، وإلا 0، و of عدد النقط الكلي (أو 0). draw رسمة SVG مسطحة (flat) غنية ومحددة بموضوع المشهد نفسه، مش أشكال عامة: (viewBox 0 0 640 640)، من 6 لـ 9 عناصر رئيسية متراصة فوق بعض في أول مستوى جوه <svg> مباشرة، كل عنصر <g> أو شكل لوحده (خلفية دايرة أو شكل كبير، الجسم الرئيسي، التفاصيل، شخصية مبسطة بوش لو مناسب، رموز صغيرة وأسهم وشرارات)، بالترتيب من الخلفية للأمام لأنها بتظهر واحد ورا التاني. استخدم ألوان مسطحة: بيج فاتح #fff3c4 و#e9dcc0 والأزرق المخضر #2f7f86 وفاتح منه #8cc3c8 والذهبي #e0a84a والأحمر #c8553d والأسود #2b2b2b، وخطوط سميكة بأطراف مدورة stroke-linecap=round، من غير أي نص أو حروف جواها ومن غير خلفية كاملة، والرسمة تملا المساحة بتوازن. معلومات صحيحة بس، وماتألفش أرقام مش متأكد منها. ماتكتبش مشهد الافتتاحية ولا الختام، هتتضاف لوحدها.
+القالب (ستايل "من جوا"): سؤال مثير، سلسلة أسئلة "طب إزاي؟ / طب ليه؟" كل جواب بيفتح سؤال، تشبيه بسيط، مقارنة، نقط مرقمة 3 لـ 4، ملخص في جملة. بعد أول مشهد قول جملة تشويق بتفتح حلقة مفتوحة (مثلا "وفي الآخر هقولك المفاجأة اللي محدش بيقولها") والمشهد قبل الأخير لازم يكون هو المفاجأة أو الإجابة اللي وعدت بيها. كل مشهد لازم يجيب معلومة جديدة أو يقلب توقع، من غير حشو ومن غير تكرار. الفيديو كله 50 لـ 65 ثانية. كل المشاهد بتشرح نفس الجسم أو الجهاز أو الظاهرة من جوا، ومشهد بعد مشهد بنركز على جزء جديد منه (زي كاميرا بتدخل جواه). لو فيه رقم حقيقي في المشهد (سرعة، حجم، عدد) حطه في stat.
+القواعد: 10 لـ 13 مشهد بالظبط. كل مشهد: voice جملة أو جملتين قصار بالمصري (حد أقصى 12 كلمة، والمشهد بيتقرا في 4 لـ 5 ثواني)، caption جملة قصيرة جدا (حد أقصى 6 كلمات) تتكتب تحت الرسمة، red كلمة واحدة بالظبط موجودة حرفيا جوه caption، n رقم النقطة (1 لـ 4) لو المشهد نقطة من نقط مرقمة، وإلا 0، و of عدد النقط الكلي (أو 0). draw رسمة SVG مسطحة (flat) غنية ومحددة بموضوع المشهد نفسه، مش أشكال عامة: (viewBox 0 0 640 640)، من 6 لـ 9 عناصر رئيسية متراصة فوق بعض في أول مستوى جوه <svg> مباشرة، كل عنصر <g> أو شكل لوحده (خلفية دايرة أو شكل كبير، الجسم الرئيسي، التفاصيل، شخصية مبسطة بوش لو مناسب، رموز صغيرة وأسهم وشرارات)، بالترتيب من الخلفية للأمام لأنها بتظهر واحد ورا التاني. استخدم ألوان مسطحة: بيج فاتح #fff3c4 و#e9dcc0 والأزرق المخضر #2f7f86 وفاتح منه #8cc3c8 والذهبي #e0a84a والأحمر #c8553d والأسود #2b2b2b، وتعبئة ألوان هادية مطفية مع خط خارجي رفيع غامق stroke="#2b2b2b" stroke-width="3" وتفاصيل دقيقة زي رسم تشريحي علمي (خطوط ظل رفيعة، نقط، عروق، طبقات)، من غير أي نص أو حروف جواها ومن غير خلفية كاملة، والرسمة تملا المساحة بتوازن. معلومات صحيحة بس، وماتألفش أرقام مش متأكد منها. ماتكتبش مشهد الافتتاحية ولا الختام، هتتضاف لوحدها.
 وفوق المشاهد اكتب hook: سؤال أو جملة صدمة قصيرة جدا (حد أقصى 8 كلمات) تتقال وتتكتب في أول 3 ثواني وتشد المشاهد فورا، تكون أقوى حاجة في الفيديو ومرتبطة بالفكرة نفسها، و hookRed كلمة واحدة من الـ hook هي اللي تتلوّن بالأحمر.
-رجّع JSON بس: كائن {hook, hookRed, scenes: مصفوفة كائنات {voice, caption, red, n, of, draw}}.`;
+قواعد الهوك: خليه بواحدة من الصيغ دي: رقم ضخم مع حالة متطرفة (مثلا "اتعمل منه 100 مليون... وبيشتغل حتى لو اتدفن في الطين")، رقم أو حقيقة صادمة، "كلهم غلطانين في...", "لو عملت كذا هيحصل كذا", أو سؤال عن حاجة شايفها كل يوم ومش فاهمها. من غير مقدمات ومن غير "في الفيديو ده".
+كمان لكل مشهد (غير الهوك): labels مصفوفة من 0 لـ 3 تسميات قصيرة جدا (كلمة أو كلمتين بالعربي) بتشاور على أجزاء الرسمة زي رسمة قطاع من جوا: كل واحدة {t: النص, x: رقم 0 لـ 640, y: رقم 0 لـ 640} مكان الجزء في الرسمة. وstamp شارة حمرا قصيرة جدا فوق الرسمة (رقم أو نسبة أو كلمة، مثلا "80%" أو "30 مل" أو "الفرق؟" أو "نادر") في المشاهد المهمة بس، وإلا اتركه فاضي.
+وكمان topic: اسم الموضوع في كلمتين أو تلاتة (مثلا "جسم الإنسان")، وفي المشاهد اللي فيها رقم حقيقي stat: {t: اسم القيمة بكلمتين, v: الرقم, u: الوحدة} وإلا اتركه فاضي.
+رجّع JSON بس: كائن {hook, hookRed, topic, scenes: مصفوفة كائنات {voice, caption, red, n, of, labels, stamp, stat, draw}}.`;
     const data = await stepPost('خطوة كتابة السكريبت', TEXT_MODELS, key, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 32768 } }, 'text');
     const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
     if (!txt.trim()) {
@@ -372,10 +375,13 @@ async function genScript(key, idea) {
     }
     if (!Array.isArray(arr) || arr.length < 3)
         throw new Error('السكريبت طلع ناقص، جرب تاني');
-    const mid = arr.slice(0, 11).map((s) => {
+    const mid = arr.slice(0, 14).map((s) => {
         const caption = String(s.caption ?? '');
         const red = String(s.red ?? '');
-        return { voice: String(s.voice ?? ''), caption, red: caption.includes(red) ? red : '', n: Math.max(0, Math.min(9, Number(s.n) || 0)), of: Math.max(0, Math.min(9, Number(s.of) || 0)), draw: cleanSvg(String(s.draw ?? '')) };
+        const labels = (Array.isArray(s.labels) ? s.labels : []).slice(0, 3).map((l) => ({ t: String(l?.t ?? '').slice(0, 22), x: Math.max(40, Math.min(600, Number(l?.x) || 320)), y: Math.max(40, Math.min(600, Number(l?.y) || 320)) })).filter((l) => l.t);
+        const stamp = String(s.stamp ?? '').slice(0, 16);
+        const sv = Number(s.stat?.v); const stat = s.stat && isFinite(sv) && String(s.stat.t || '') ? { t: String(s.stat.t).slice(0, 20), v: sv, u: String(s.stat.u ?? '').slice(0, 10) } : null;
+        return { labels, stamp, stat, voice: String(s.voice ?? ''), caption, red: caption.includes(red) ? red : '', n: Math.max(0, Math.min(9, Number(s.n) || 0)), of: Math.max(0, Math.min(9, Number(s.of) || 0)), draw: cleanSvg(String(s.draw ?? '')) };
     });
     // Fix missing or too-simple drawings: one regeneration attempt, then a rich built-in drawing.
     for (let i = 0; i < mid.length; i++) {
@@ -403,7 +409,8 @@ async function genScript(key, idea) {
             hr = '';
         out.push({ voice: hookText, caption: hookText, red: hr, n: 0, of: 0, draw: HOOK_DRAW, hook: true });
     }
-    return [...out, { ...first }, ...mid, { ...last }];
+    const topic = String(hookObj?.topic ?? '').slice(0, 24);
+    return [...out, { ...first, teaser: 'ابقى للآخر: فيه مفاجأة' }, ...mid, { ...last, closer: true }].map((x) => ({ ...x, topic }));
 }
 async function genVoice(key, text, voice) {
     const data = await stepPost('خطوة الصوت', TTS_MODELS, key, {
@@ -499,134 +506,148 @@ function wordTimes(scene) {
     _wt.set(key, r);
     return r;
 }
-function drawFrame(ctx, scene, img, idx, total, t) {
-    ctx.fillStyle = C.bg;
-    ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(0,0,0,.06)';
-    ctx.lineWidth = 1;
-    for (let x = 0; x <= W; x += 40) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, H);
-        ctx.stroke();
-    }
-    for (let y = 0; y <= H; y += 40) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(W, y);
-        ctx.stroke();
-    }
-    // floating background dots (slow parallax)
-    for (let n = 0; n < 7; n++) {
-        const px = (n * 173 + 60 + Math.sin(t * 0.6 + n) * 24) % W, py = (n * 211 + 90 + t * (10 + n * 3) * (n % 2 ? 1 : -1) + 4000) % 1100;
-        ctx.globalAlpha = 0.16; ctx.fillStyle = n % 3 === 0 ? C.b : n % 3 === 1 ? C.a : C.c;
-        ctx.beginPath(); ctx.arc(px, py + 60, 10 + (n % 3) * 7, 0, 7); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-    // scene title (small) when it differs from the spoken line
-    const hasTitle = scene.caption && scene.caption !== scene.voice;
-    if (hasTitle) {
-        ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.font = 'bold 42px "Noto Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif';
-        ctx.globalAlpha = Math.min(1, t / 0.3); ctx.fillStyle = C.ink;
-        ctx.fillText(scene.caption, W / 2, 90);
-        ctx.globalAlpha = 1;
-    }
-    // drawing: pop-in from a different side per scene, then gentle float and slow zoom
-    const k = Math.min(1, t / 0.55);
-    const c1 = 1.70158, c3 = c1 + 1;
-    const eb = 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2);
-    const e = 1 - Math.pow(1 - k, 3);
-    if (img) {
-        const dir = idx % 4;
-        const dx = (dir === 0 ? -1 : dir === 1 ? 1 : 0) * 220 * (1 - e), dy = (dir === 2 ? 1 : dir === 3 ? -1 : 0) * 220 * (1 - e);
-        const zoom = ((scene.hook ? 0.74 : 0.62) + 0.38 * eb) * (1 + 0.05 * Math.min(1, t / (scene.dur ?? 3)));
-        const size = 600 * zoom;
-        const shake = scene.hook ? Math.max(0, 1 - t / 0.6) : 0;
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, k * 1.6);
-        ctx.translate(W / 2 + dx + Math.sin(t * 45) * 7 * shake, 450 + dy + Math.sin(t * 2.1) * 9 + Math.cos(t * 38) * 7 * shake);
-        ctx.rotate(Math.sin(t * 1.4 + idx) * 0.018 + (1 - e) * (dir % 2 ? 0.12 : -0.12));
-        const L = img.layers;
-        if (L && L.length > 1) {
-            const step = scene.hook ? 0.14 : Math.min(0.28, 1.5 / L.length);
-            L.forEach((li, n) => {
-                const lk = Math.max(0, Math.min(1, (t - (scene.hook ? 0.05 : 0.12) - n * step) / (scene.hook ? 0.35 : 0.45)));
-                if (lk <= 0) return;
-                const lb = 1 + c3 * Math.pow(lk - 1, 3) + c1 * Math.pow(lk - 1, 2);
-                const sc = (0.55 + 0.45 * lb);
-                ctx.save();
-                ctx.globalAlpha = Math.min(1, lk * 2.2);
-                ctx.translate(0, (1 - lk) * 50 + Math.sin(t * 2.4 + n * 1.1) * (n ? 6 : 2));
-                ctx.rotate(Math.sin(t * 1.7 + n) * (n ? 0.012 : 0.004));
-                ctx.scale(sc, sc);
-                ctx.drawImage(li, -size / 2, -size / 2, size, size);
-                ctx.restore();
-            });
-        } else ctx.drawImage(img, -size / 2, -size / 2, size, size);
-        ctx.restore();
-    }
-    // numbered point counter: badge plus progress dots
-    if (scene.n > 0) {
-        const pk = Math.min(1, t / 0.4), pb = 1 + 2.7 * Math.pow(pk - 1, 3) + 1.7 * Math.pow(pk - 1, 2);
-        ctx.save(); ctx.translate(100, 90); ctx.scale(pb, pb);
-        ctx.fillStyle = C.c; ctx.beginPath(); ctx.arc(0, 0, 44, 0, 7); ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 52px "Noto Sans Arabic",Tahoma,Arial,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.direction = 'ltr';
-        ctx.fillText(String(scene.n), 0, 3); ctx.restore();
-        const tot = scene.of >= scene.n ? scene.of : scene.n;
-        if (tot > 1) for (let d = 0; d < tot; d++) { ctx.globalAlpha = Math.min(1, t / 0.4); ctx.fillStyle = d < scene.n ? C.c : 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.arc(W / 2 + (d - (tot - 1) / 2) * 34, 150, d === scene.n - 1 ? 11 : 8, 0, 7); ctx.fill(); }
-        ctx.globalAlpha = 1;
-    }
-    // word-synced karaoke captions
-    const tm = wordTimes(scene);
-    ctx.direction = 'rtl'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    ctx.font = 'bold 60px "Noto Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif';
-    if (tm.words.length) {
-        let cur = tm.words.findIndex((w) => t >= w.s && t < w.e);
-        if (cur < 0) cur = t < tm.words[0].s ? 0 : tm.words.length - 1;
-        const g = tm.words[cur].g, grp = tm.words.filter((w) => w.g === g);
-        const space = ctx.measureText(' ').width + 14, pad = 16;
-        const wid = grp.map((w) => ctx.measureText(w.t).width);
-        const totalW = wid.reduce((a, b) => a + b, 0) + space * (grp.length - 1);
-        let x = W / 2 + totalW / 2;
-        grp.forEach((w, n) => {
-            const active = w === tm.words[cur];
-            const isKey = !!(scene.red && w.t.includes(scene.red));
-            const pop = active ? 1 + (isKey ? 0.28 : 0.1) * Math.max(0, 1 - (t - w.s) / (isKey ? 0.3 : 0.15)) : 1;
-            ctx.save();
-            ctx.translate(x - wid[n] / 2, 900); ctx.scale(pop, pop);
-            if (active) { ctx.fillStyle = C.c; const bw = wid[n] + pad * 2, bh = 88; ctx.beginPath(); ctx.roundRect(-bw / 2, -bh / 2, bw, bh, 20); ctx.fill(); }
-            ctx.fillStyle = active ? '#fff' : (isKey ? C.c : C.ink); ctx.textAlign = 'center';
-            ctx.fillText(w.t, 0, 0);
-            if (isKey && !active) { const up = Math.min(1, Math.max(0, (t - w.s) / 0.35)); ctx.strokeStyle = C.c; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); for (let q = 0; q <= 20 * up; q++) { const xx = wid[n] / 2 - (q / 20) * wid[n]; const yy = 40 + Math.sin(q * 1.2) * 4; q ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); } ctx.stroke(); }
-            if (isKey && active) { const sp = (t - w.s); for (let q = 0; q < 6; q++) { const a = q * 1.047 + 0.3, r = 70 + sp * 120; ctx.globalAlpha = Math.max(0, 1 - sp / 0.6); ctx.fillStyle = C.b; ctx.beginPath(); ctx.arc(Math.cos(a) * (wid[n] / 2 + r * 0.6), Math.sin(a) * r * 0.5, 6, 0, 7); ctx.fill(); } ctx.globalAlpha = 1; }
-            ctx.restore();
+const FONT = '"Noto Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif';
+let _paper = null;
+function paperBg() {
+    if (_paper) return _paper;
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+    x.fillStyle = C.bg; x.fillRect(0, 0, W, H);
+    for (let n = 0; n < 700; n++) { x.fillStyle = 'rgba(110,80,40,' + (0.015 + (n * 7 % 5) * 0.006) + ')'; x.fillRect((n * 97) % W, (n * 211) % H, 2, 2); }
+    x.save(); x.beginPath(); x.rect(26, 26, W - 52, H - 52); x.clip();
+    x.strokeStyle = 'rgba(120,95,60,.10)'; x.lineWidth = 1;
+    for (let a = 26; a <= W; a += 15) { x.beginPath(); x.moveTo(a, 26); x.lineTo(a, H - 26); x.stroke(); }
+    for (let b = 26; b <= H; b += 15) { x.beginPath(); x.moveTo(26, b); x.lineTo(W - 26, b); x.stroke(); }
+    x.strokeStyle = 'rgba(120,95,60,.17)';
+    for (let a = 26; a <= W; a += 75) { x.beginPath(); x.moveTo(a, 26); x.lineTo(a, H - 26); x.stroke(); }
+    for (let b = 26; b <= H; b += 75) { x.beginPath(); x.moveTo(26, b); x.lineTo(W - 26, b); x.stroke(); }
+    x.restore();
+    x.strokeStyle = C.ink; x.lineWidth = 2.5; x.strokeRect(26, 26, W - 52, H - 52);
+    _paper = c; return c;
+}
+function badge(ctx, text, cx, cy, size, k) {
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(k, k);
+    ctx.font = 'bold ' + size + 'px ' + FONT; ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + 40, h = size * 1.6;
+    ctx.fillStyle = '#f3ecda'; ctx.strokeStyle = C.ink; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, 12); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = C.c; ctx.fillText(text, 0, 3); ctx.restore();
+}
+// Sentence text: words go from faint to dark as they are spoken; the key word is red and underlined.
+function sentence(ctx, scene, t, cx, y0, size, lineH, maxW, weight) {
+    const tm = wordTimes(scene); if (!tm.words.length) return;
+    ctx.font = weight + ' ' + size + 'px ' + FONT; ctx.direction = 'rtl'; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    const space = ctx.measureText(' ').width + 4;
+    const lines = wrap(ctx, tm.words.map((w) => w.t), maxW);
+    let wi = 0;
+    lines.forEach((ln, li) => {
+        const wid = ln.map((w) => ctx.measureText(w).width), total = wid.reduce((a, b) => a + b, 0) + space * (ln.length - 1);
+        let x = cx + total / 2; const y = y0 + li * lineH;
+        ln.forEach((w, n) => {
+            const wd = tm.words[wi++], on = t >= wd.s - 0.02, key = !!(scene.red && w.includes(scene.red));
+            const pop = on ? Math.max(0, 1 - (t - wd.s) / 0.18) : 0;
+            ctx.globalAlpha = on ? 1 : 0.28; ctx.fillStyle = key ? C.c : C.ink;
+            ctx.save(); ctx.translate(x - wid[n] / 2, y); const sc = 1 + (key ? 0.16 : 0.05) * pop; ctx.scale(sc, sc); ctx.fillText(w, 0, 0); ctx.restore();
+            if (key && on) { const up = Math.min(1, (t - wd.s) / 0.3); ctx.strokeStyle = C.c; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x, y + size * 0.62); ctx.lineTo(x - wid[n] * up, y + size * 0.62); ctx.stroke(); }
             x -= wid[n] + space;
         });
+    });
+    ctx.globalAlpha = 1;
+}
+function drawFrame(ctx, scene, img, idx, total, t) {
+    ctx.drawImage(paperBg(), 0, 0);
+    const dur = scene.dur ?? 4, fade = Math.min(1, t / 0.3);
+    const bottom = scene.hook ? 0 : 880;
+    let punch = 0;
+    if (scene.red) { const w0 = wordTimes(scene).words.find((w) => w.t.includes(scene.red)); if (w0) { const d0 = t - w0.s; if (d0 >= 0 && d0 < 0.35) punch = 0.045 * (1 - d0 / 0.35); } }
+    const e = 1 - Math.pow(1 - Math.min(1, t / 0.6), 3);
+    if (img) {
+        ctx.save();
+        if (scene.hook) {
+            // title card: small drawing under the big title
+            ctx.globalAlpha = fade; ctx.translate(W / 2, 640 + (1 - e) * 30); const z = (0.7 + 0.3 * e) * (1 + 0.04 * Math.min(1, t / dur) + punch); ctx.scale(z, z);
+            ctx.drawImage(img, -230, -230, 460, 460);
+        } else {
+            ctx.beginPath(); ctx.rect(28, 28, W - 56, bottom - 28); ctx.clip();
+            // continuous slow zoom and pan across the drawing
+            const p = Math.min(1, t / dur), dir = idx % 2 ? 1 : -1;
+            const z = (1.0 + 0.12 * p + punch) * (0.94 + 0.06 * e);
+            ctx.globalAlpha = fade; const l0 = scene.labels && scene.labels[0]; ctx.translate(W / 2 + dir * (26 * p - 13) + (l0 ? (320 - l0.x) * 0.3 * p : 0), 455 + 18 * (0.5 - p) + (l0 ? (320 - l0.y) * 0.3 * p : 0));
+            ctx.scale(z, z);
+            const size = 760, L = img.layers;
+            if (L && L.length > 1) {
+                const step = Math.min(0.3, 1.6 / L.length);
+                L.forEach((li, n) => { const lk = Math.max(0, Math.min(1, (t - 0.1 - n * step) / 0.4)); if (lk <= 0) return; const q = 0.94 + 0.06 * lk; ctx.save(); ctx.globalAlpha = lk * fade; ctx.translate(0, (1 - lk) * 22); ctx.scale(q, q); ctx.drawImage(li, -size / 2, -size / 2, size, size); ctx.restore(); });
+            } else ctx.drawImage(img, -size / 2, -size / 2, size, size);
+        }
+        ctx.restore();
     }
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 34px "Noto Sans Arabic",Tahoma,Arial,sans-serif';
-    ctx.fillStyle = C.a;
-    ctx.fillText('سر في دقيقة', W / 2, 1180);
-    ctx.fillStyle = C.a;
-    const bw = (W - 160) * (scene.prog ?? ((idx + Math.min(1, t / ((scene.dur ?? 3)))) / total));
-    ctx.fillRect(80, 1220, W - 160, 6 / 1);
-    ctx.fillStyle = C.c;
-    ctx.fillRect(80, 1220, bw, 6);
-    // scene transition: a colored band wipes across at the start of each scene
-    if (idx > 0 && t < 0.42) {
-        const p = t / 0.42, e2 = p * p * (3 - 2 * p);
-        const edge = e2 < 0.5 ? 2 * e2 : 2 * e2 - 1;
-        ctx.fillStyle = idx % 2 ? C.a : C.b;
-        if (e2 < 0.5) ctx.fillRect(W * (1 - edge), 0, W * edge, H); else ctx.fillRect(0, 0, W * (1 - edge), H);
+    if (!scene.hook) {
+        // labels: text with a thin leader line and a dot, like the reference
+        if (scene.labels && scene.labels.length && img) {
+            const sz = 760 * (1 + 0.06);
+            scene.labels.forEach((l, n) => {
+                const lk = Math.max(0, Math.min(1, (t - 0.9 - n * 0.5) / 0.3)); if (lk <= 0) return;
+                const tx = W / 2 + (l.x / 640 - 0.5) * sz, ty = 455 + (l.y / 640 - 0.5) * sz;
+                const left = tx < W / 2, px = left ? 135 : W - 135, py = Math.max(150, Math.min(800, ty + (n % 2 ? -70 : 70)));
+                ctx.save(); ctx.globalAlpha = lk; ctx.strokeStyle = C.ink; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+                ctx.beginPath(); ctx.moveTo(px, py + 20); ctx.lineTo(px + (tx - px) * lk, py + 20 + (ty - py - 20) * lk); ctx.stroke();
+                ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(tx, ty, 5 * lk, 0, 7); ctx.fill();
+                ctx.font = 'bold 30px ' + FONT; ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                const w = ctx.measureText(l.t).width + 34; ctx.fillStyle = '#f7f1e1'; ctx.strokeStyle = n === 0 ? C.c : C.ink; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(px - w / 2, py - 22, w, 44, 8); ctx.fill(); ctx.stroke();
+                ctx.fillStyle = n === 0 ? C.c : C.ink; ctx.fillText(l.t, px, py + 2); ctx.restore();
+            });
+        }
+        // red value badge, top left of the drawing
+        if (scene.stamp) { const sk = Math.max(0, Math.min(1, (t - 0.8) / 0.25)); if (sk > 0) { const sb = 1 + 2.2 * Math.pow(sk - 1, 3) + 1.2 * Math.pow(sk - 1, 2); badge(ctx, scene.stamp, 160, 105, 44, 0.7 + 0.3 * sb); } }
+        // animated stat counter (counts up like the reel's speed gauges)
+        if (scene.stat) {
+            const k0 = Math.max(0, Math.min(1, (t - 1.0) / 0.3)); if (k0 > 0) {
+                const cp = Math.min(1, (t - 1.1) / 1.4), val = scene.stat.v * (1 - Math.pow(1 - Math.max(0, cp), 3));
+                const txt = (Math.abs(scene.stat.v) >= 100 ? Math.round(val) : Math.round(val * 10) / 10) + ' ' + scene.stat.u;
+                ctx.save(); ctx.globalAlpha = k0; ctx.translate(W / 2, 800); ctx.font = 'bold 24px ' + FONT; ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#f7f1e1'; ctx.strokeStyle = C.ink; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.roundRect(-190, -42, 380, 84, 12); ctx.fill(); ctx.stroke();
+                ctx.fillStyle = 'rgba(45,42,38,.6)'; ctx.fillText(scene.stat.t, 0, -22); ctx.font = 'bold 44px ' + FONT; ctx.fillStyle = C.c; ctx.fillText(txt, 0, 14); ctx.restore();
+            }
+        }
+        // numbered step chips, top right
+        if (scene.n > 0) {
+            const tot = scene.of >= scene.n ? scene.of : Math.max(4, scene.n);
+            for (let k = 1; k <= tot; k++) {
+                const cx = W - 80 - (k - 1) * 62, cy = 100, cur = k === scene.n, on = k <= scene.n, pk = cur ? 1 + 0.22 * Math.max(0, 1 - t / 0.35) : 1;
+                ctx.save(); ctx.translate(cx, cy); ctx.scale(pk, pk); ctx.fillStyle = on ? C.c : '#f3ecda'; ctx.strokeStyle = C.ink; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(0, 0, 26, 0, 7); ctx.fill(); ctx.stroke();
+                ctx.fillStyle = on ? '#fff' : C.ink; ctx.font = 'bold 30px ' + FONT; ctx.direction = 'ltr'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(k), 0, 2); ctx.restore();
+            }
+        }
+        // rule, watermark, caption
+        ctx.strokeStyle = 'rgba(45,42,38,.45)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(60, bottom); ctx.lineTo(W - 60, bottom); ctx.stroke();
+        ctx.font = '600 24px ' + FONT; ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = 'rgba(45,42,38,.38)'; ctx.fillText('؟ سر في دقيقة', W / 2, bottom + 38);
+        sentence(ctx, scene, t, W / 2, bottom + 118, 46, 70, 600, 'bold');
+    } else {
+        // title card: big title, corner marks like the reference's first frame
+        sentence(ctx, scene, t, W / 2, 190, 62, 92, 600, 'bold');
+        ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        [[26, 26, 1, 1], [W - 26, 26, -1, 1], [26, H - 26, 1, -1], [W - 26, H - 26, -1, -1]].forEach(([cx, cy, sx, sy]) => { ctx.beginPath(); ctx.moveTo(cx + sx * 4, cy + sy * 40); ctx.lineTo(cx + sx * 4, cy + sy * 4); ctx.lineTo(cx + sx * 40, cy + sy * 4); ctx.stroke(); });
+        const bk = Math.max(0, Math.min(1, (t - 0.5) / 0.25)); if (bk > 0) badge(ctx, '؟', W / 2 + 150, 520, 46, 0.7 + 0.3 * bk);
+        ctx.font = '600 24px ' + FONT; ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(45,42,38,.38)'; ctx.fillText('؟ سر في دقيقة', W / 2, 1180);
     }
-    // hook intro: a quick white-to-red flash at the very start
-    if (scene.hook && t < 0.38) {
-        ctx.globalAlpha = (1 - t / 0.38) * 0.85;
-        ctx.fillStyle = t < 0.08 ? '#fff' : C.c;
-        ctx.fillRect(0, 0, W, H);
-        ctx.globalAlpha = 1;
+    if (scene.topic) { ctx.font = 'bold 24px ' + FONT; ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = C.c; ctx.fillText(scene.topic, W / 2, 64); }
+    // open-loop teaser under the opener
+    if (scene.teaser) { const kk = Math.min(1, t / 0.4); ctx.globalAlpha = kk; badge(ctx, scene.teaser, W / 2, 1130 + (1 - kk) * 20, 32, 1); ctx.globalAlpha = 1; }
+    // save and share card on the last scene
+    if (scene.closer || idx === total - 1) {
+        const ck = Math.min(1, Math.max(0, (t - 0.3) / 0.35)), beat = 1 + 0.04 * Math.sin(t * 7);
+        ctx.save(); ctx.globalAlpha = ck; ctx.translate(W / 2, 1120); ctx.scale(beat, beat);
+        ctx.font = 'bold 36px ' + FONT; ctx.direction = 'rtl'; const w = ctx.measureText('احفظه وابعته لحد').width + 110;
+        ctx.fillStyle = C.c; ctx.strokeStyle = C.ink; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.roundRect(-w / 2, -40, w, 80, 14); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('احفظه وابعته لحد', 18, 3);
+        ctx.beginPath(); ctx.moveTo(-w / 2 + 22, -20); ctx.lineTo(-w / 2 + 54, -20); ctx.lineTo(-w / 2 + 54, 22); ctx.lineTo(-w / 2 + 38, 8); ctx.lineTo(-w / 2 + 22, 22); ctx.closePath(); ctx.fill();
+        ctx.restore();
     }
+    // thin progress line inside the frame
+    const bw = (W - 120) * (scene.prog ?? ((idx + Math.min(1, t / dur)) / total));
+    ctx.fillStyle = 'rgba(45,42,38,.15)'; ctx.fillRect(60, 1214, W - 120, 4); ctx.fillStyle = C.c; ctx.fillRect(60, 1214, bw, 4);
+    // soft fade between scenes
+    if (idx > 0 && t < 0.22) { ctx.globalAlpha = 0.55 * (1 - t / 0.22); ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
 }
 async function renderRecorder(canvas, scenes, onProgress) {
     const ctx = canvas.getContext('2d');
